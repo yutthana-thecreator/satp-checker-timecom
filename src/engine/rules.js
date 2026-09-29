@@ -16,6 +16,18 @@ export function lookupSite(code, neType, suffix) {
   return cands.find((s) => s.nodeType === neType && s.suffix === suffix) || cands.find((s) => s.nodeType === neType) || cands[0];
 }
 
+// ชนิดโหนดแบบอ่านง่าย จาก NE type + shelf + จำนวนทิศ (+ Add/Drop เมื่อเป็น DC2DC ROADM)
+export function nodeKind(f) {
+  const sh = f.shelves || {};
+  if (f.nodeType === "EILA") return "EILA";
+  if (f.nodeType === "ILA") return (sh["PSS-8"] || 0) >= 2 ? "ILA + OTDR" : "ILA";
+  if (f.nodeType === "RDM") {
+    const ad = f.project === "DC2DC" || (sh["PSI-M"] || 0) > 0 ? " + Add/Drop" : "";
+    return `ROADM ${f.degrees || "?"}D${ad}`;
+  }
+  return f.nodeType || "?";
+}
+
 export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date()) {
   // site: { code, folder, satp: parsedSatp|null, att: parsedAtt|null, satpFile, attFile, pagesSatp, pagesAtt }
   const issues = [];
@@ -87,6 +99,7 @@ export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date())
     facts.shelves = { [t]: Math.max(1, shelfNos.size) };
     facts.shelvesInferred = true;
   }
+  facts.nodeKind = nodeKind(facts);
   const pm = matchProfile(facts);
   facts.profile = pm.profile ? pm.profile.id : null;
   facts.profileName = pm.profile ? pm.profile.name : null;

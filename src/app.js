@@ -170,17 +170,17 @@ function renderResults() {
   $("#sec-results").hidden = false;
   $("#run-meta").textContent = `ตรวจเมื่อ ${run.when} · ${run.results.length} ไซต์ · ขั้นตอน: ${criteria.stage?.value === "accepted" ? "หลังลูกค้าเซ็น" : "ก่อนส่งลูกค้า"}`;
   const t = $("#summary");
-  t.replaceChildren(el("tr", {}, ...["ไซต์", "โฟลเดอร์", "ประเภท", "โปรไฟล์", "ทิศ", "ไฟ", "สถานะ", "ไม่ผ่าน", "เตือน", "รูป (Accept/Reject/รอ)"].map((h) => el("th", {}, h))));
+  t.replaceChildren(el("tr", {}, ...["ไซต์", "โฟลเดอร์", "ชนิดโหนด", "รหัส", "โปรไฟล์", "ทิศ", "ไฟ", "สถานะ", "ไม่ผ่าน", "เตือน", "รูป (Accept/Reject/รอ)"].map((h) => el("th", {}, h))));
   for (const r of run.results) {
     const rv = reviewStats(reviews[r.site.key]);
     const tr = el("tr", { class: "clickable", onclick: () => showDetail(r) },
-      el("td", {}, r.facts.code), el("td", {}, r.site.folder), el("td", {}, `${r.facts.nodeType || "?"}_${r.facts.suffix || ""}`),
+      el("td", {}, r.facts.code), el("td", {}, r.site.folder), el("td", {}, r.facts.nodeKind || "?"), el("td", {}, `${r.facts.nodeType || "?"}_${r.facts.suffix || ""}`),
       el("td", {}, r.facts.profile || el("span", { class: "pill info" }, `ไม่มี → ROM ตรวจเอง`)),
       el("td", {}, r.facts.degrees ?? "-"), el("td", {}, r.facts.power), el("td", {}, pill(r.summary.status)),
       el("td", {}, r.summary.fail), el("td", {}, r.summary.warn), el("td", { id: "rv-" + cssId(r.site.key) }, `${rv.accept} / ${rv.reject} / ${rv.pending}`));
     t.append(tr);
   }
-  for (const e of run.errors) t.append(el("tr", {}, el("td", { colspan: 10, class: "pill fail" }, `อ่านไฟล์ไม่ได้: ${e.name} — ${e.error}`)));
+  for (const e of run.errors) t.append(el("tr", {}, el("td", { colspan: 11, class: "pill fail" }, `อ่านไฟล์ไม่ได้: ${e.name} — ${e.error}`)));
   $("#details").replaceChildren();
 }
 const cssId = (s) => s.replace(/[^a-zA-Z0-9]/g, "_");
@@ -358,7 +358,7 @@ function renderSummaryRow(r) {
   const rows = [...$("#summary").querySelectorAll("tr.clickable")];
   const row = rows.find((tr) => tr.children[1].textContent === r.site.folder && tr.children[0].textContent === r.facts.code);
   if (!row) return;
-  row.children[6].replaceChildren(pill(r.summary.status)); row.children[7].textContent = r.summary.fail; row.children[8].textContent = r.summary.warn;
+  row.children[7].replaceChildren(pill(r.summary.status)); row.children[8].textContent = r.summary.fail; row.children[9].textContent = r.summary.warn;
 }
 
 // ---------- ฐานความรู้ ----------
@@ -385,17 +385,17 @@ function exportExcel() {
 }
 function saveHistory() {
   const h = JSON.parse(localStorage.getItem("satp:history") || "[]");
-  for (const r of run.results) h.unshift({ when: run.when, code: r.facts.code, folder: r.site.folder, status: r.summary.status, fail: r.summary.fail, warn: r.summary.warn, profile: r.facts.profile || "-" });
+  for (const r of run.results) h.unshift({ when: run.when, code: r.facts.code, folder: r.site.folder, kind: r.facts.nodeKind, status: r.summary.status, fail: r.summary.fail, warn: r.summary.warn, profile: r.facts.profile || "-" });
   localStorage.setItem("satp:history", JSON.stringify(h.slice(0, 300)));
   renderHistory();
 }
 function renderHistory() {
   const h = JSON.parse(localStorage.getItem("satp:history") || "[]");
   const t = $("#history");
-  t.replaceChildren(el("tr", {}, ...["เมื่อ", "ไซต์", "โฟลเดอร์", "โปรไฟล์", "สถานะ", "ไม่ผ่าน", "เตือน", ""].map((x) => el("th", {}, x))));
-  h.slice(0, 50).forEach((x, i) => t.append(el("tr", {}, el("td", {}, x.when), el("td", {}, x.code), el("td", {}, x.folder), el("td", {}, x.profile), el("td", {}, pill(x.status)), el("td", {}, x.fail), el("td", {}, x.warn),
+  t.replaceChildren(el("tr", {}, ...["เมื่อ", "ไซต์", "โฟลเดอร์", "ชนิดโหนด", "โปรไฟล์", "สถานะ", "ไม่ผ่าน", "เตือน", ""].map((x) => el("th", {}, x))));
+  h.slice(0, 50).forEach((x, i) => t.append(el("tr", {}, el("td", {}, x.when), el("td", {}, x.code), el("td", {}, x.folder), el("td", {}, x.kind || ""), el("td", {}, x.profile), el("td", {}, pill(x.status)), el("td", {}, x.fail), el("td", {}, x.warn),
     el("td", {}, el("button", { class: "btn small", title: "ลบรายการนี้", onclick: () => { h.splice(i, 1); localStorage.setItem("satp:history", JSON.stringify(h)); renderHistory(); } }, "ลบ")))));
-  if (!h.length) t.append(el("tr", {}, el("td", { colspan: 8, class: "hint" }, "ยังไม่มีประวัติ")));
+  if (!h.length) t.append(el("tr", {}, el("td", { colspan: 9, class: "hint" }, "ยังไม่มีประวัติ")));
 }
 
 // ---------- ทดสอบในเครื่อง (localhost เท่านั้น) ----------

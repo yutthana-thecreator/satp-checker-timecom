@@ -26,7 +26,7 @@ const { results, errors } = await analyzeFiles(pdfjs, files, {
 });
 console.error(`\n${((Date.now() - t0) / 1000).toFixed(1)}s`);
 fs.mkdirSync("test/out", { recursive: true });
-const slim = results.map((r) => ({ key: r.site.key, code: r.facts.code, profile: r.facts.profile, nearest: r.facts.nearestProfile, mismatches: r.facts.profileMismatches, degrees: r.facts.degrees, power: r.facts.power, shelves: r.facts.shelves, summary: r.summary, issues: r.issues }));
+const slim = results.map((r) => ({ key: r.site.key, code: r.facts.code, profile: r.facts.profile, nodeKind: r.facts.nodeKind, nearest: r.facts.nearestProfile, mismatches: r.facts.profileMismatches, degrees: r.facts.degrees, power: r.facts.power, shelves: r.facts.shelves, summary: r.summary, issues: r.issues }));
 fs.writeFileSync("test/out/results.json", JSON.stringify(slim, null, 1));
 let total = 0;
 for (const r of slim) {
