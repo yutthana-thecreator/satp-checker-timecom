@@ -219,7 +219,7 @@ export function parseAttachment(pages) {
   out.shelfRemarks = [];
   out.fiberScope = [];
   for (const p of pages) {
-    for (const m of p.text.matchAll(/SHELF\s?0?(\d)\s+(PSS-8|PSI[_-]8L|PSI_M)|(PSS-8|PSI[_-]8L)\s+SHELF\s?0?(\d)/g)) out.shelfRemarks.push({ shelf: m[1] || m[4], type: m[2] || m[3], page: p.no });
+    for (const m of p.text.matchAll(/SHELF\s?0?(\d)\s+(PSS-?8|PSI[_-]?8L|PSI[_-]?M)|(PSS-?8|PSI[_-]?8L)\s+SHELF\s?0?(\d)/g)) out.shelfRemarks.push({ shelf: m[1] || m[4], type: m[2] || m[3], page: p.no });
     for (const m of p.text.matchAll(/Name:\s*([^|]+)/g)) out.fiberScope.push({ name: m[1].trim(), page: p.no });
   }
   out.placeholders = pages.filter((p) => /Type text here/i.test(p.text)).map((p) => p.no);

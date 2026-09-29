@@ -255,7 +255,7 @@ export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date())
       const exp = parseDate(e.calTo);
       if (!exp) add("R26", 1, "fail", "1.3 Test Equipment", e.page, `${e.desc} S/N ${e.serial}: ไม่มีวันหมดอายุ calibration`);
       else if (de && exp < de) add("R26", 3, "fail", "1.3 Test Equipment", e.page, `${e.desc} S/N ${e.serial}: calibration หมดอายุ ${e.calTo} ก่อนวันติดตั้ง ${H.installEnd}`);
-      else if (exp < today) add("R26", 3, "warn", "1.3 Test Equipment", e.page, `${e.desc} S/N ${e.serial}: calibration หมดอายุแล้ว (${e.calTo})`, "คนตรวจ");
+      else if (exp < today) add("R26", 3, "info", "1.3 Test Equipment", e.page, `${e.desc} S/N ${e.serial}: calibration ใช้ได้ ณ วันติดตั้ง แต่หมดอายุแล้ว (${e.calTo}) — งานใหม่หลังวันนี้ต้องใช้ใบใหม่`, "ระบบ");
     }
   }
 
