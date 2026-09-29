@@ -209,12 +209,22 @@ function showDetail(r) {
   box.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function issuesTable(r) {
+function issuesTable(r, showInfo = false) {
   const LV = { 0: "-", 1: "1 ครบถ้วน", 2: "2 สอดคล้อง", 3: "3 ค่าเทคนิค" };
+  const wrap = el("div", {});
+  const real = r.issues.filter((i) => i.severity !== "info");
+  const infos = r.issues.filter((i) => i.severity === "info");
+  // ผ่าน = ไม่แสดงอะไร นอกจากข้อความผ่าน; ข้อมูลอ้างอิง (โปรไฟล์, หมายเหตุ) ดูได้เมื่อกดขยาย
+  if (!real.length) wrap.append(el("p", {}, el("span", { class: "pill ok" }, r.summary.status), " ", r.facts.customerAccepted ? "ลูกค้าตรวจรับแล้ว — ไม่ต้องตรวจก่อน submit" : "ไม่พบข้อผิดหรือข้อสังเกต — ส่งลูกค้าได้"));
+  if (infos.length) wrap.append(el("button", { class: "btn small", onclick: () => wrap.replaceWith(issuesTable(r, !showInfo)) }, showInfo ? "ซ่อนข้อมูลอ้างอิง" : `แสดงข้อมูลอ้างอิง (${infos.length})`));
+  const rows = showInfo ? r.issues : real;
+  if (!rows.length) return wrap;
   const t = el("table", { class: "tbl issues" }, el("tr", {}, ...["ระดับ", "ผล", "กฎ", "Section", "หน้า", "ประเด็น", "ใครตรวจต่อ", "การตัดสินใจ ROM"].map((h) => el("th", {}, h))));
-  const refresh = () => { applyDecisions(r); r.summary = summarize(r.issues); renderSummaryRow(r); t.replaceWith(issuesTable(r)); };
-  for (const i of r.issues) {
-    const needsHuman = !(i.severity === "fail" && i.who === "ระบบ") && i.rule !== "P00" && !r.facts.customerAccepted;
+  wrap.append(t);
+  const refresh = () => { applyDecisions(r); r.summary = summarize(r.issues); renderSummaryRow(r); wrap.replaceWith(issuesTable(r, showInfo)); };
+  for (const i of rows) {
+    // ปุ่มตัดสินใจเฉพาะ "เตือน" (ระบบไม่แน่ใจ) — ข้อมูลและข้อผิดที่ระบบยืนยันได้ไม่ต้องตัดสิน
+    const needsHuman = i.severity === "warn" && !r.facts.customerAccepted;
     let cell;
     if (i.learned) {
       cell = el("td", {}, el("span", { class: "pill " + (i.learned.decision === "accept" ? "ok" : "warn") }, i.learned.decision === "accept" ? "ยอมรับแล้ว" : "ยืนยันปัญหา"), ` ${i.learned.by || ""} ${i.learned.at}`, i.learned.reason ? ` — ${i.learned.reason}` : "", " ", el("button", { class: "btn small", onclick: () => { forgetDecision(i, r.facts); refresh(); renderKb(); } }, "ลบ"));
@@ -222,10 +232,10 @@ function issuesTable(r) {
       const reason = el("input", { type: "text", placeholder: "เหตุผล (ถ้ามี)", size: "14" });
       const go = (d) => { recordDecision(i, r.facts, d, reason.value.trim(), $("#reviewer").value.trim()); refresh(); renderKb(); };
       cell = el("td", {}, el("button", { class: "btn small", onclick: () => go("accept") }, "ยอมรับ"), " ", el("button", { class: "btn small", onclick: () => go("confirm") }, "ยืนยันปัญหา"), " ", reason);
-    } else cell = el("td", { class: "hint" }, "ระบบยืนยันได้เอง");
+    } else cell = el("td", { class: "hint" }, i.severity === "fail" ? "ระบบยืนยันได้เอง" : "");
     t.append(el("tr", {}, el("td", {}, LV[i.level]), el("td", {}, el("span", { class: "pill " + (i.severity === "fail" ? "fail" : i.severity) }, i.severity === "fail" ? "ไม่ผ่าน" : i.severity === "warn" ? "เตือน" : "ข้อมูล"), i.origSeverity ? el("div", { class: "hint" }, `(เดิม ${i.origSeverity})`) : null), el("td", {}, i.rule), el("td", {}, i.section), el("td", {}, i.page ?? ""), el("td", { class: "msg" }, i.msg), el("td", {}, i.who), cell));
   }
-  return t;
+  return wrap;
 }
 
 // ---------- 10/11. ตรวจรูป ----------
