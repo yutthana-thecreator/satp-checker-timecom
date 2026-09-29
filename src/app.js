@@ -174,7 +174,7 @@ function renderResults() {
       el("td", {}, r.facts.code), el("td", {}, r.site.folder), el("td", {}, r.site.satp?.header.project || ""), el("td", {}, r.site.satp?.header.model || ""), el("td", {}, r.facts.nodeKind || "?"), el("td", {}, `${r.facts.nodeType || "?"}_${r.facts.suffix || ""}`),
       el("td", {}, r.facts.profile || el("span", { class: "pill info" }, `ไม่มี → ROM ตรวจเอง`)),
       el("td", {}, r.facts.degrees ?? "-"), el("td", {}, r.facts.power), el("td", {}, pill(r.summary.status)),
-      el("td", {}, r.summary.fail), el("td", {}, r.summary.warn), el("td", { id: "rv-" + cssId(r.site.key) }, `${rv.accept} / ${rv.reject} / ${rv.pending}`));
+      el("td", {}, r.summary.fail), el("td", {}, r.summary.warn), el("td", { id: "rv-" + cssId(r.site.key) }, r.facts.customerAccepted ? "–" : `${rv.accept} / ${rv.reject} / ${rv.pending}`));
     t.append(tr);
   }
   for (const e of run.errors) t.append(el("tr", {}, el("td", { colspan: 13, class: "pill fail" }, `อ่านไฟล์ไม่ได้: ${e.name} — ${e.error}`)));
@@ -203,7 +203,8 @@ function showDetail(r) {
   const tabReview = el("button", { onclick: async () => { activate(tabReview); body.replaceChildren(el("p", { class: "hint" }, "กำลังดึงรูปจาก Attachment…")); body.replaceChildren(await reviewPanel(r)); } }, "ตรวจรูป (Accept/Reject)");
   const tabOcr = el("button", { onclick: () => { activate(tabOcr); const wrap = el("div", {}); body.replaceChildren(wrap); ocrPanel(r, wrap); } }, "OCR screenshot");
   const activate = (b) => { for (const x of tabs.children) x.classList.toggle("active", x === b); };
-  tabs.append(tabIssues, tabReview, tabOcr);
+  if (r.facts.customerAccepted) tabs.append(tabIssues, el("span", { class: "hint" }, "ลูกค้าตรวจรับแล้ว — ไม่ต้องตรวจรูป / OCR"));
+  else tabs.append(tabIssues, tabReview, tabOcr);
   box.replaceChildren(el("div", { class: "detail" }, el("h3", {}, `${facts.code} — ${r.site.folder}`, " ", pill(r.summary.status)), head, tabs, body));
   body.append(issuesTable(r));
   box.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -328,9 +329,9 @@ function reviewCard(r, item, im, pageText) {
     const reason = reasonSel.value === "อื่นๆ (ระบุ)" ? reasonTxt.value.trim() || "อื่นๆ" : reasonSel.value + (reasonTxt.value.trim() ? ": " + reasonTxt.value.trim() : "");
     setVerdict(r, item, "reject", reason, im.canvas); refresh();
   } }, "Reject");
-  card.append(img, el("div", { class: "cap" }, `หน้า ${item.page} รูปที่ ${item.idx + 1} · ${im.width}×${im.height}`, pageText ? el("div", { class: "hint" }, pageText.slice(0, 160)) : null),
+  card.append(...[img, el("div", { class: "cap" }, `หน้า ${item.page} รูปที่ ${item.idx + 1} · ${im.width}×${im.height}`, pageText ? el("div", { class: "hint" }, pageText.slice(0, 160)) : null),
     item.auto ? el("div", { class: "auto-note" }, "ระบบ: " + item.auto) : null,
-    el("div", { class: "act" }, accept, reject, reasonSel, reasonTxt), status);
+    el("div", { class: "act" }, accept, reject, reasonSel, reasonTxt), status].filter(Boolean));
   refresh();
   return card;
 }

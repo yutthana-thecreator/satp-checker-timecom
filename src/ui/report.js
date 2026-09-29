@@ -7,7 +7,7 @@ export function buildWorkbook(results, reviews, meta) {
   const sum = [["ไซต์", "โฟลเดอร์", "Project / Link", "DWDM Model", "ชนิดโหนด", "รหัส", "โปรไฟล์", "ทิศ", "ระบบไฟ", "สถานะ", "ไม่ผ่าน", "เตือน", "รูป Accept", "รูป Reject", "รูปยังไม่ตรวจ", "ผู้ตรวจรูป", "SATP", "Attachment"]];
   for (const r of results) {
     const rv = reviewStats(reviews[r.site.key]);
-    sum.push([r.facts.code, r.site.folder, r.site.satp?.header.project || "", r.site.satp?.header.model || "", r.facts.nodeKind || "", `${r.facts.nodeType || ""}_${r.facts.suffix || ""}`, r.facts.profile || `ไม่มี (ใกล้ ${r.facts.nearestProfile})`, r.facts.degrees, r.facts.power, r.summary.status, r.summary.fail, r.summary.warn, rv.accept, rv.reject, rv.pending, rv.reviewer, r.site.satpFile, r.site.attFile]);
+    sum.push([r.facts.code, r.site.folder, r.site.satp?.header.project || "", r.site.satp?.header.model || "", r.facts.nodeKind || "", `${r.facts.nodeType || ""}_${r.facts.suffix || ""}`, r.facts.profile || `ไม่มี (ใกล้ ${r.facts.nearestProfile})`, r.facts.degrees, r.facts.power, r.summary.status, r.summary.fail, r.summary.warn, ...(r.facts.customerAccepted ? ["–", "–", "–", "ลูกค้าตรวจรับแล้ว"] : [rv.accept, rv.reject, rv.pending, rv.reviewer]), r.site.satpFile, r.site.attFile]);
   }
   sum.push([], ["ตรวจเมื่อ", meta.when], ["ผู้ตรวจ", meta.reviewer || ""], ["เวอร์ชัน", meta.version]);
   XLSX.utils.book_append_sheet(wb, aoa(sum, [10, 26, 12, 12, 18, 10, 22, 5, 8, 16, 7, 7, 9, 9, 11, 12, 40, 40]), "สรุป");
