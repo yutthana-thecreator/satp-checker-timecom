@@ -51,7 +51,9 @@ export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date())
   // ---------- R03 หน้า 1 ----------
   for (const [f, label] of [["station", "Station Name"], ["ip", "IP Address"], ["model", "DWDM Model"], ["installStart", "Installation Start"], ["installEnd", "Installation End"]])
     if (!H[f]) add("R03", 1, "fail", "SATP หน้า 1", 1, `ไม่ได้กรอก ${label}`);
-  if (!H.acceptanceDate) add("R03", 1, "fail", "SATP หน้า 1", 1, "ไม่มี Acceptance Date");
+  // ขั้น "ก่อนส่งลูกค้า": Acceptance Date และลายเซ็น TIME ยังไม่ต้องมี → รายงานเป็นข้อมูล
+  const presubmit = criteria.stage?.value !== "accepted";
+  if (!H.acceptanceDate) add("R03", 1, presubmit ? "info" : "fail", "SATP หน้า 1", 1, presubmit ? "ยังไม่มี Acceptance Date (ลูกค้ากรอกตอน acceptance)" : "ไม่มี Acceptance Date");
   if (S.checklist && S.checklist.ticks < 5) add("R03", 1, "fail", "1.2 Checklist", S.checklist.page, `Checklist ติ๊ก ${S.checklist.ticks}/5 ข้อ`);
 
   // ---------- R04 Block diagram ----------
@@ -61,8 +63,8 @@ export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date())
   // ---------- R05 ลายเซ็น/วันที่ ----------
   const signPages = S.pageDates.filter((d) => d.page >= 6 && d.page <= 27);
   const withDate = signPages.filter((d) => d.date).length;
-  if (withDate === 0) add("R05", 1, "fail", "ทุกหน้า", null, `ไม่มีวันที่ในช่อง Performed/Verified by (หน้า 6–27)${fileInfo.signed || A?.file?.signed ? "" : " และชื่อไฟล์ไม่มี _Signed"}`, "คนตรวจ");
-  else if (withDate < signPages.length - 4) add("R05", 1, "warn", "ทุกหน้า", null, `มีวันที่ในช่องลายเซ็น ${withDate}/${signPages.length} หน้า — ตรวจหน้าที่ไม่มี`, "คนตรวจ");
+  if (withDate === 0) add("R05", 1, presubmit ? "info" : "fail", "ทุกหน้า", null, `ไม่มีวันที่ในช่อง Performed/Verified by (หน้า 6–27)${fileInfo.signed || A?.file?.signed ? "" : " และชื่อไฟล์ไม่มี _Signed"}`, "คนตรวจ");
+  else if (withDate < signPages.length - 4) add("R05", 1, presubmit ? "info" : "warn", "ทุกหน้า", null, `มีวันที่ในช่องลายเซ็น ${withDate}/${signPages.length} หน้า — ตรวจหน้าที่ไม่มี`, "คนตรวจ");
 
   // ---------- R06 placeholder ----------
   if (S.placeholders.length) add("R06", 1, "fail", "SATP", S.placeholders[0], `มีข้อความ template ค้าง 'Type text here' หน้า ${S.placeholders.join(", ")}`);

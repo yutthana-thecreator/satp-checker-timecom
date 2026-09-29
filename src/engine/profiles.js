@@ -23,6 +23,8 @@ export const DEFAULT_CRITERIA = {
   shortSpanKm: { value: 10, source: "ตัวอย่าง DC2DC 0.6–6 km vs AGRID 18–86 km" },
   // ใบ calibration ต้องไม่หมดอายุ ณ วันติดตั้ง
   calibrationCheck: { value: true, source: "template 1.3" },
+  // ขั้นตอนที่ตรวจ: presubmit = เอกสารจาก subcon ก่อนส่งลูกค้า (ไม่บังคับ Acceptance Date/ลายเซ็น TIME) · accepted = ตรวจฉบับที่ลูกค้าเซ็นแล้ว
+  stage: { value: "presubmit", source: "ขั้นตอนการใช้งาน" },
 };
 
 export const PROFILES = [

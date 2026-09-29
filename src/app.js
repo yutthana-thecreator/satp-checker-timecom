@@ -43,6 +43,8 @@ async function init() {
   renderCriteria();
   renderHistory();
   $("#run").addEventListener("click", runCheck);
+  $("#stage").value = criteria.stage?.value || "presubmit";
+  $("#stage").addEventListener("change", (e) => { criteria.stage.value = e.target.value; saveCriteria(); renderCriteria(); });
   $("#clear").addEventListener("click", () => { files = []; renderFileList(); });
   $("#toggle-criteria").addEventListener("click", () => { $("#criteria").hidden = !$("#criteria").hidden; });
   $("#export").addEventListener("click", exportExcel);
@@ -111,6 +113,7 @@ const CRIT_LABELS = {
   groundMax: ["ค่ากราวด์สูงสุด", ["value"], "Ω"], groundAllowNonNumeric: ["ยอมรับกราวด์ N/A หรือ OL", ["value"], "bool"],
   lossPerKmWarn: ["Loss/km เตือนเมื่อเกิน (span ยาว)", ["value", "minDistanceKm"], "dB/km, km"], shortSpanTotalLossWarn: ["Total loss เตือนเมื่อเกิน (span สั้น)", ["value"], "dB"],
   lossTolerance: ["ความคลาดเคลื่อน Total Loss vs TX−RX", ["value"], "dB"], shortSpanKm: ["span สั้น = น้อยกว่า", ["value"], "km"], calibrationCheck: ["ตรวจวันหมดอายุ calibration", ["value"], "bool"],
+  stage: ["ขั้นตอนที่ตรวจ", ["value"], "stage"],
 };
 function renderCriteria() {
   const t = el("table", {});
@@ -118,12 +121,13 @@ function renderCriteria() {
   for (const [k, [label, fields, unit]] of Object.entries(CRIT_LABELS)) {
     const inputs = fields.map((f) => {
       const v = criteria[k][f];
-      const inp = unit === "bool" ? el("input", { type: "checkbox" }) : el("input", { type: "number", step: "any", value: v ?? "" });
+      const inp = unit === "bool" ? el("input", { type: "checkbox" }) : unit === "stage" ? el("select", {}, el("option", { value: "presubmit" }, "ก่อนส่งลูกค้า (subcon ส่งมา)"), el("option", { value: "accepted" }, "หลังลูกค้าเซ็น (ต้องมี Acceptance Date + ลายเซ็น)")) : el("input", { type: "number", step: "any", value: v ?? "" });
       if (unit === "bool") inp.checked = !!v;
-      inp.addEventListener("change", () => { criteria[k][f] = unit === "bool" ? inp.checked : inp.value === "" ? null : +inp.value; saveCriteria(); });
+      if (unit === "stage") inp.value = v || "presubmit";
+      inp.addEventListener("change", () => { criteria[k][f] = unit === "bool" ? inp.checked : unit === "stage" ? inp.value : inp.value === "" ? null : +inp.value; saveCriteria(); if (unit === "stage") $("#stage").value = inp.value; });
       return [f === "max" ? " – " : f === "minDistanceKm" ? " เมื่อระยะ ≥ " : "", inp];
     });
-    t.append(el("tr", {}, el("td", {}, label), el("td", {}, ...inputs), el("td", {}, unit === "bool" ? "" : unit), el("td", { class: "hint" }, criteria[k].source)));
+    t.append(el("tr", {}, el("td", {}, label), el("td", {}, ...inputs), el("td", {}, unit === "bool" || unit === "stage" ? "" : unit), el("td", { class: "hint" }, criteria[k].source)));
   }
   const reset = el("button", { class: "btn small", onclick: () => { localStorage.removeItem("satp:criteria"); criteria = loadCriteria(); renderCriteria(); } }, "คืนค่าเริ่มต้น");
   $("#criteria").replaceChildren(el("p", { class: "hint" }, "ค่าเริ่มต้นมาจาก template และสถิติเอกสารตัวอย่าง 46 ไซต์ — แก้แล้วเก็บในเบราว์เซอร์นี้ ค่าว่าง = ไม่ตัดสิน รายงานค่าอย่างเดียว"), t, reset);
@@ -157,7 +161,7 @@ function pill(status) {
 
 function renderResults() {
   $("#sec-results").hidden = false;
-  $("#run-meta").textContent = `ตรวจเมื่อ ${run.when} · ${run.results.length} ไซต์`;
+  $("#run-meta").textContent = `ตรวจเมื่อ ${run.when} · ${run.results.length} ไซต์ · ขั้นตอน: ${criteria.stage?.value === "accepted" ? "หลังลูกค้าเซ็น" : "ก่อนส่งลูกค้า"}`;
   const t = $("#summary");
   t.replaceChildren(el("tr", {}, ...["ไซต์", "โฟลเดอร์", "ประเภท", "โปรไฟล์", "ทิศ", "ไฟ", "สถานะ", "ไม่ผ่าน", "เตือน", "รูป (Accept/Reject/รอ)"].map((h) => el("th", {}, h))));
   for (const r of run.results) {
