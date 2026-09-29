@@ -54,8 +54,18 @@ export function deleteRow(table, key) {
 export async function pullAll() {
   if (!cloud.ready) return null;
   const tables = ["issue_decisions", "image_decisions", "learned_profiles", "ref_images", "section_stats"];
-  const res = await Promise.all(tables.map((t) => sb.from(t).select("key,data").then(check)));
+  const res = await Promise.all(tables.map((t) => selectAll(t)));
   return Object.fromEntries(tables.map((t, i) => [t, res[i].map((r) => ({ key: r.key, ...r.data }))]));
+}
+
+// PostgREST คืนสูงสุด 1000 แถวต่อครั้ง → อ่านเป็นหน้า
+async function selectAll(table, page = 1000) {
+  const out = [];
+  for (let from = 0; ; from += page) {
+    const rows = await sb.from(table).select("key,data").order("key").range(from, from + page - 1).then(check);
+    out.push(...rows);
+    if (rows.length < page) return out;
+  }
 }
 
 // ---------- รูปย่ออ้างอิง (Storage) ----------

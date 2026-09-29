@@ -7,7 +7,7 @@ import { ocrSite } from "./ui/ocr.js";
 import { ocrChecks } from "./engine/ocrRules.js";
 import { summarize } from "./engine/rules.js";
 import { setLearnedProfiles } from "./engine/profiles.js";
-import { kb, applyDecisions, recordDecision, forgetDecision, deleteDecisionRecord, learnProfile, forgetProfile, addRefImage, refImagesFor, refImagesForProfile, removeRefImage, recordImageDecision, findImageDecision, recordSectionCount, expectedCount, topicOf, exportKb, importKb, kbStats, syncFromCloud, uploadLocalToCloud } from "./ui/learn.js";
+import { kb, applyDecisions, recordDecision, forgetDecision, deleteDecisionRecord, learnProfile, forgetProfile, addRefImage, refImagesFor, refImagesForProfile, removeRefImage, listRefKeys, isReferenceSource, recordImageDecision, findImageDecision, recordSectionCount, expectedCount, topicOf, exportKb, importKb, kbStats, syncFromCloud, uploadLocalToCloud } from "./ui/learn.js";
 import { cloud, initCloud } from "./ui/cloud.js";
 
 const VERSION = "0.2.0";
@@ -50,6 +50,7 @@ async function init() {
   $("#clear").addEventListener("click", () => { files = []; renderFileList(); });
   $("#toggle-criteria").addEventListener("click", () => { $("#criteria").hidden = !$("#criteria").hidden; });
   $("#export").addEventListener("click", exportExcel);
+  $("#harvest").addEventListener("click", harvestAllAsSamples);
   $("#clear-history").addEventListener("click", () => { if (confirm("ล้างประวัติการตรวจทั้งหมดในเบราว์เซอร์นี้?")) { localStorage.removeItem("satp:history"); renderHistory(); } });
   $("#clear-reviews").addEventListener("click", () => { if (!confirm("ล้างผล Accept/Reject ของทุกไซต์ในเบราว์เซอร์นี้? (รูปอ้างอิงในฐานความรู้ยังอยู่)")) return; for (const k of Object.keys(localStorage)) if (k.startsWith("satp:review:")) localStorage.removeItem(k); for (const k of Object.keys(reviews)) delete reviews[k]; if (run) { for (const r of run.results) reviews[r.site.key] = { items: [] }; renderResults(); } });
   $("#clear-all").addEventListener("click", async () => {
@@ -308,25 +309,44 @@ async function collectSiteImages(r, onProgress = () => {}) {
   return { items };
 }
 
-// ไซต์ที่ลูกค้าเซ็นแล้ว = ลูกค้ายืนยันว่ารูปชุดนี้ใช้ได้ → เก็บทุกรูปเป็นรูปอ้างอิงของ (โปรไฟล์ × หัวข้อ) และจำจำนวนรูปต่อหัวข้อ
-async function harvestSignedSites(results, prog) {
-  const signed = results.filter((r) => r.facts.customerAccepted && r.site.att);
-  if (!signed.length) return;
-  let added = 0;
-  for (const r of signed) {
+// เก็บทุกรูปของไซต์เป็นรูปอ้างอิงของ (โปรไฟล์ × หัวข้อ) และจำจำนวนรูปต่อหัวข้อ
+// source "signed" = ลูกค้าเซ็นแล้ว (อัตโนมัติ) · "sample" = ROM กำหนดให้ชุดนี้เป็นตัวอย่าง (ปุ่มในผลตรวจ)
+async function harvestSites(list, source, prog) {
+  const sites = list.filter((r) => r.site.att);
+  if (!sites.length) return { sites: 0, added: 0 };
+  const keys = await listRefKeys();
+  const by = source === "signed" ? "ลูกค้าเซ็นแล้ว" : `ตัวอย่าง (${$("#reviewer").value.trim() || "ROM"})`;
+  let added = 0, i = 0;
+  for (const r of sites) {
+    i++;
     const profileKey = r.facts.profile || "L:" + r.facts.nearestProfile;
-    const { items } = await collectSiteImages(r, (t) => { prog.textContent = `เก็บรูปอ้างอิงจากไซต์ที่ลูกค้าเซ็นแล้ว — ${t}`; });
+    const { items } = await collectSiteImages(r, (t) => { prog.textContent = `เก็บรูปอ้างอิง ${i}/${sites.length} — ${t}`; });
     const counts = {};
     for (const it of items) {
       counts[topicOf(it.section, it.topic)] = (counts[topicOf(it.section, it.topic)] || 0) + 1;
-      const rec = await addRefImage({ profile: profileKey, section: it.section, topic: it.topic, site: r.facts.code, page: it.page, thumb: thumb(it.im.canvas, 320), hash: it.hash, by: "ลูกค้าเซ็นแล้ว", source: "signed" });
+      prog.textContent = `เก็บรูปอ้างอิง ${i}/${sites.length} — ${r.facts.code} หน้า ${it.page} (ใหม่ ${added})`;
+      const rec = await addRefImage({ profile: profileKey, section: it.section, topic: it.topic, site: r.facts.code, page: it.page, thumb: thumb(it.im.canvas, 320), hash: it.hash, by, source }, keys);
       if (rec) added++;
     }
     const seenTopics = new Set();
     for (const it of items) { const k = topicOf(it.section, it.topic); if (seenTopics.has(k)) continue; seenTopics.add(k); recordSectionCount(profileKey, it.section, it.topic, r.facts.code, counts[k]); }
   }
-  prog.textContent = `เสร็จ ${results.length} ไซต์ · เก็บรูปอ้างอิงจากไซต์ที่ลูกค้าเซ็นแล้ว ${signed.length} ไซต์ (รูปใหม่ ${added})`;
   renderKb();
+  return { sites: sites.length, added };
+}
+async function harvestSignedSites(results, prog) {
+  const signed = results.filter((r) => r.facts.customerAccepted);
+  if (!signed.length) return;
+  const n = await harvestSites(signed, "signed", prog);
+  prog.textContent = `เสร็จ ${results.length} ไซต์ · เก็บรูปอ้างอิงจากไซต์ที่ลูกค้าเซ็นแล้ว ${n.sites} ไซต์ (รูปใหม่ ${n.added})`;
+}
+async function harvestAllAsSamples() {
+  if (!run) return;
+  if (!confirm(`ใช้รูปของทุกไซต์ในชุดนี้ (${run.results.length} ไซต์) เป็นรูปอ้างอิงตัวอย่าง? ระบบจะถือว่ารูปเหล่านี้ถูกต้อง และใช้เทียบกับไซต์ต่อไปในโปรไฟล์เดียวกัน`)) return;
+  const btn = $("#harvest"); btn.disabled = true;
+  const n = await harvestSites(run.results, "sample", $("#progress"));
+  $("#progress").textContent = `เก็บรูปอ้างอิงตัวอย่างจาก ${n.sites} ไซต์ (รูปใหม่ ${n.added})`;
+  btn.disabled = false;
 }
 
 async function reviewPanel(r) {
@@ -336,7 +356,7 @@ async function reviewPanel(r) {
   const rv = reviews[r.site.key];
   const wrap = el("div", {});
   const allRefs = await refImagesForProfile(profileKey);
-  const signedRefs = allRefs.filter((x) => x.source === "signed" && x.site !== r.facts.code);
+  const signedRefs = allRefs.filter((x) => isReferenceSource(x.source) && x.site !== r.facts.code);
   let curLabel = null, curTopic = null, g = null;
   for (const it of items) {
     if (it.label !== curLabel) { curLabel = it.label; curTopic = null; wrap.append(el("h3", {}, it.label)); }
@@ -347,9 +367,17 @@ async function reviewPanel(r) {
       const exp = expectedCount(profileKey, it.section, it.topic);
       const refs = allRefs.filter((x) => topicOf(x.section, x.topic) === tkey);
       const head = el("div", { class: "topic-head" }, el("strong", {}, it.topic || it.label), ` · ${n} รูป`);
-      if (exp) head.append(el("span", { class: exp.median !== n ? "auto-note" : "hint" }, ` — ไซต์ที่ลูกค้าเซ็นแล้วในโปรไฟล์นี้มี ${exp.min === exp.max ? exp.median : `${exp.min}–${exp.max}`} รูป (${exp.sites} ไซต์)${exp.median !== n ? " ← จำนวนต่างจากตัวอย่าง" : ""}`));
+      const outOfRange = exp && (n < exp.min || n > exp.max);
+      if (exp) head.append(el("span", { class: outOfRange ? "auto-note" : "hint" }, ` — ไซต์ตัวอย่างในโปรไฟล์นี้มี ${exp.min === exp.max ? exp.median : `${exp.min}–${exp.max}`} รูป (ค่ากลาง ${exp.median}, ${exp.sites} ไซต์)${outOfRange ? " ← จำนวนต่างจากตัวอย่าง" : ""}`));
       wrap.append(head);
-      if (refs.length) wrap.append(el("div", { class: "ref-strip" }, el("span", { class: "hint" }, "รูปอ้างอิง: "), ...refs.slice(0, 8).map((x) => el("span", { class: "ref-item " + (x.source === "signed" ? "signed" : "") }, el("img", { src: x.thumb, title: `${x.site} หน้า ${x.page} · ${x.by || ""} ${x.at}` }), el("small", {}, x.source === "signed" ? `ลูกค้าเซ็น · ${x.site}` : `ROM · ${x.site}`), el("button", { class: "btn small", title: "ถอดออกจากรูปอ้างอิง", onclick: async (e) => { await removeRefImage(x.id); e.target.parentElement.remove(); renderKb(); } }, "×")))));
+      if (refs.length) {
+        const sorted = refs.slice().sort((a, b) => (a.source === "signed" ? 0 : a.source === "sample" ? 1 : 2) - (b.source === "signed" ? 0 : b.source === "sample" ? 1 : 2) || (b.ts || 0) - (a.ts || 0));
+        const strip = el("div", { class: "ref-strip" }, el("span", { class: "hint" }, `รูปอ้างอิง (${refs.length}): `));
+        const show = (list) => list.map((x) => el("span", { class: "ref-item " + (isReferenceSource(x.source) ? "signed" : "") }, el("img", { src: x.thumb, title: `${x.site} หน้า ${x.page} · ${x.by || ""} ${x.at}` }), el("small", {}, `${x.source === "signed" ? "ลูกค้าเซ็น" : x.source === "sample" ? "ตัวอย่าง" : "ROM"} · ${x.site}`), el("button", { class: "btn small", title: "ถอดออกจากรูปอ้างอิง", onclick: async (e) => { await removeRefImage(x.id); e.target.parentElement.remove(); renderKb(); } }, "×")));
+        strip.append(...show(sorted.slice(0, 6)));
+        if (sorted.length > 6) { const more = el("button", { class: "btn small", onclick: () => { more.replaceWith(...show(sorted.slice(6))); } }, `+${sorted.length - 6} รูป`); strip.append(more); }
+        wrap.append(strip);
+      }
       g = el("div", { class: "review-grid" });
       wrap.append(g);
     }
@@ -362,7 +390,7 @@ async function reviewPanel(r) {
     // รูปซ้ำ = ขนาดพิกเซลเท่ากันและ hash ต่างไม่เกิน 4/256 บิต (ไม่นับรูปเดียวกันที่ถูกวางซ้ำในหน้าเดียว)
     for (const [k2, v2] of Object.entries(hashCache)) if (k2 !== key && v2.w === im.width && v2.hh === im.height && k2.split("|").slice(0, 2).join("|") !== `${r.site.key}|${p}` && hamming(h, v2.h) <= 4) auto.push(`เหมือนรูป ${k2.split("|")[0]} หน้า ${k2.split("|")[1]}`);
     const reused = signedRefs.find((x) => hamming(h, x.hash) <= 4);
-    if (reused) auto.push(`เหมือนรูปของไซต์ ${reused.site} ที่ลูกค้าเซ็นแล้ว (หน้า ${reused.page}) — รูปถูกนำมาใช้ซ้ำ?`);
+    if (reused) auto.push(`เหมือนรูปของไซต์ตัวอย่าง ${reused.site} (หน้า ${reused.page}) — รูปถูกนำมาใช้ซ้ำ?`);
     if (blur < 15) auto.push(`ภาพอาจเบลอ (คมชัด ${blur.toFixed(0)})`);
     const prev = findImageDecision(h);
     if (prev && prev.verdict === "reject") auto.push(`รูปนี้เคยถูก Reject ที่ ${prev.site}: ${prev.reason} (${prev.by || ""})`);
@@ -373,7 +401,7 @@ async function reviewPanel(r) {
   saveReview(r);
   const bulk = el("div", { class: "row" },
     el("button", { class: "btn small", onclick: () => { for (const it of rv.items) if (!it.verdict) setVerdict(r, it, "accept"); wrap.querySelectorAll(".review-item").forEach((c) => c.dispatchEvent(new Event("refresh"))); } }, "Accept ที่เหลือทั้งหมด"),
-    el("span", { class: "hint" }, `ไซต์จะ 'ผ่าน' ส่วนรูปเมื่อทุกรูปถูก Accept — Reject ต้องระบุเหตุผล · รูปอ้างอิงของโปรไฟล์นี้ ${allRefs.length} รูป (จากไซต์ที่ลูกค้าเซ็นแล้ว ${signedRefs.length})`));
+    el("span", { class: "hint" }, `ไซต์จะ 'ผ่าน' ส่วนรูปเมื่อทุกรูปถูก Accept — Reject ต้องระบุเหตุผล · รูปอ้างอิงของโปรไฟล์นี้ ${allRefs.length} รูป จาก ${new Set(allRefs.map((x) => x.site)).size} ไซต์`));
   wrap.prepend(bulk);
   return wrap;
 }
@@ -448,7 +476,7 @@ function renderSummaryRow(r) {
 async function renderKb() {
   const box = $("#kb"); if (!box) return;
   const st = await kbStats();
-  const head = el("p", {}, `การตัดสินใจประเด็น ${st.decisions} · โปรไฟล์ที่เรียนรู้ ${st.profiles} · รูปอ้างอิง ${st.refImages} (จากไซต์ที่ลูกค้าเซ็นแล้ว ${st.signedRefs} รูป / ${st.signedSites} ไซต์) · รูปที่เคยตัดสิน ${st.imageDecisions}`);
+  const head = el("p", {}, `การตัดสินใจประเด็น ${st.decisions} · โปรไฟล์ที่เรียนรู้ ${st.profiles} · รูปอ้างอิง ${st.refImages} (จากไซต์ตัวอย่าง/ลูกค้าเซ็นแล้ว ${st.signedRefs} รูป / ${st.signedSites} ไซต์) · รูปที่เคยตัดสิน ${st.imageDecisions}`);
   const dt = el("table", { class: "tbl" }, el("tr", {}, ...["กฎ", "Section", "ตัดสินใจ", "เหตุผล", "ตัวอย่างประเด็น", "โดย", "เมื่อ", "ครั้ง", ""].map((h) => el("th", {}, h))));
   for (const d of kb.decisions.slice().reverse().slice(0, 30)) dt.append(el("tr", {}, el("td", {}, d.rule), el("td", {}, d.section), el("td", {}, el("span", { class: "pill " + (d.decision === "accept" ? "ok" : "warn") }, d.decision === "accept" ? "ยอมรับ" : "ยืนยันปัญหา")), el("td", {}, d.reason), el("td", { class: "hint msg" }, d.example), el("td", {}, d.by), el("td", {}, d.at), el("td", {}, d.count || 1), el("td", {}, el("button", { class: "btn small", onclick: () => { deleteDecisionRecord(d); renderKb(); } }, "ลบ"))));
   const pt = el("table", { class: "tbl" }, el("tr", {}, ...["โปรไฟล์", "ชื่อ", "ตัวอย่าง", "ไซต์", "โดย", ""].map((h) => el("th", {}, h))));
@@ -494,6 +522,6 @@ if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
       }
       renderFileList();
     },
-    runCheck, get result() { return run; }, files: () => files, reviews, ocrCache, wb: () => buildWorkbook(run.results, reviews, { when: run.when, reviewer: "", version: VERSION }),
+    runCheck, harvestAllAsSamples: () => harvestSites(run.results, "sample", $("#progress")), get result() { return run; }, files: () => files, reviews, ocrCache, wb: () => buildWorkbook(run.results, reviews, { when: run.when, reviewer: "", version: VERSION }),
   };
 }
