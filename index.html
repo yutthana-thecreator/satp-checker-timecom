@@ -31,7 +31,7 @@
     <div class="row">
       <button id="run" class="btn primary" disabled>ตรวจเอกสาร</button>
       <button id="clear" class="btn">ล้าง</button>
-      <label>ขั้นตอน <select id="stage"><option value="presubmit">ก่อนส่งลูกค้า (เอกสารจาก subcon)</option><option value="accepted">หลังลูกค้าเซ็น</option></select></label>
+      <span class="hint">ตรวจเฉพาะเอกสารที่ subcon ส่งมาก่อน submit — ไฟล์ที่ลูกค้าเซ็น/มี Acceptance Date แล้วจะถือว่าผ่านทั้งหมด</span>
       <button id="toggle-criteria" class="btn">เกณฑ์ตรวจ</button>
       <span id="progress" class="progress"></span>
     </div>

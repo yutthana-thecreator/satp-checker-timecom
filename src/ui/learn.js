@@ -45,6 +45,7 @@ export function forgetDecision(issue, facts) {
 
 // ใส่ผลการตัดสินใจเดิมลงในประเด็นของผลตรวจใหม่ (เรียกหลัง checkSite)
 export function applyDecisions(result) {
+  if (result.facts.customerAccepted) return;
   for (const i of result.issues) {
     if (i.severity === "fail" && i.who === "ระบบ") continue; // ข้อผิดที่ระบบยืนยันได้เอง ไม่ต้องเรียนรู้
     const d = findDecision(i, result.facts);

@@ -64,8 +64,9 @@ export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date())
   for (const [f, label] of [["station", "Station Name"], ["ip", "IP Address"], ["model", "DWDM Model"], ["installStart", "Installation Start"], ["installEnd", "Installation End"]])
     if (!H[f]) add("R03", 1, "fail", "SATP หน้า 1", 1, `ไม่ได้กรอก ${label}`);
   // ขั้น "ก่อนส่งลูกค้า": Acceptance Date และลายเซ็น TIME ยังไม่ต้องมี → รายงานเป็นข้อมูล
-  const presubmit = criteria.stage?.value !== "accepted";
-  if (!H.acceptanceDate) add("R03", 1, presubmit ? "info" : "fail", "SATP หน้า 1", 1, presubmit ? "ยังไม่มี Acceptance Date (ลูกค้ากรอกตอน acceptance)" : "ไม่มี Acceptance Date");
+  // ระบบตรวจเฉพาะเอกสารที่ subcon ส่งมาก่อน submit — Acceptance Date/ลายเซ็นลูกค้าไม่ใช่เงื่อนไข
+  // ถ้าลูกค้าเซ็น/กรอก Acceptance Date มาแล้ว = ผ่านการ acceptance แล้ว ไม่ต้องตรวจซ้ำ (ตัดสินท้ายฟังก์ชัน)
+  facts.customerAccepted = !!H.acceptanceDate || !!(fileInfo.signed || A?.file?.signed);
   if (S.checklist && S.checklist.ticks < 5) add("R03", 1, "fail", "1.2 Checklist", S.checklist.page, `Checklist ติ๊ก ${S.checklist.ticks}/5 ข้อ`);
 
   // ---------- R04 Block diagram ----------
@@ -75,8 +76,8 @@ export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date())
   // ---------- R05 ลายเซ็น/วันที่ ----------
   const signPages = S.pageDates.filter((d) => d.page >= 6 && d.page <= 27);
   const withDate = signPages.filter((d) => d.date).length;
-  if (withDate === 0) add("R05", 1, presubmit ? "info" : "fail", "ทุกหน้า", null, `ไม่มีวันที่ในช่อง Performed/Verified by (หน้า 6–27)${fileInfo.signed || A?.file?.signed ? "" : " และชื่อไฟล์ไม่มี _Signed"}`, "คนตรวจ");
-  else if (withDate < signPages.length - 4) add("R05", 1, presubmit ? "info" : "warn", "ทุกหน้า", null, `มีวันที่ในช่องลายเซ็น ${withDate}/${signPages.length} หน้า — ตรวจหน้าที่ไม่มี`, "คนตรวจ");
+  // วันที่ในช่องลายเซ็นแยกไม่ได้ว่าเป็นของ NOKIA หรือ TIME → ไม่ใช้ตัดสินว่าลูกค้ารับแล้ว (ใช้ Acceptance Date / ไฟล์ _Signed เท่านั้น)
+  facts.signatureDates = withDate;
 
   // ---------- R06 placeholder ----------
   if (S.placeholders.length) add("R06", 1, "fail", "SATP", S.placeholders[0], `มีข้อความ template ค้าง 'Type text here' หน้า ${S.placeholders.join(", ")}`);
@@ -164,13 +165,12 @@ export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date())
   if (!siteRef) add("R10", 2, "info", "รายชื่อไซต์", 1, `ไซต์ ${facts.code} ไม่อยู่ในรายชื่อ 56 ไซต์ของโปรเจกต์ไทย (ตัวอย่าง/ไซต์นอกรายการ)`);
 
   // ---------- R11 วันที่ ----------
-  const ds = parseDate(H.installStart), de = parseDate(H.installEnd), da = parseDate(H.acceptanceDate);
+  const ds = parseDate(H.installStart), de = parseDate(H.installEnd);
   if (H.installStart && !ds) add("R11", 2, "fail", "SATP หน้า 1", 1, `วันที่ติดตั้ง Start รูปแบบผิด: '${H.installStart}'`);
   if (H.installEnd && !de) add("R11", 2, "fail", "SATP หน้า 1", 1, `วันที่ติดตั้ง End รูปแบบผิด: '${H.installEnd}'`);
   if (ds && de && de < ds) add("R11", 2, "fail", "SATP หน้า 1", 1, `End (${H.installEnd}) ก่อน Start (${H.installStart})`);
   if (ds && ds > today) add("R11", 2, "fail", "SATP หน้า 1", 1, `วันที่ติดตั้งอยู่ในอนาคต: ${H.installStart}`);
-  if (H.acceptanceDate && !da) add("R11", 2, "fail", "SATP หน้า 1", 1, `Acceptance Date รูปแบบผิด: '${H.acceptanceDate}'`);
-  if (da && de && da < de) add("R11", 2, "fail", "SATP หน้า 1", 1, `Acceptance Date (${H.acceptanceDate}) ก่อนวันติดตั้งเสร็จ (${H.installEnd})`);
+
 
   // ---------- R12 / R13 span consistency ----------
   const self = code;
@@ -280,6 +280,11 @@ export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date())
   add("R02", 1, "info", "Section 2", null, filled.length ? `Network test ที่มีค่า: ${filled.join(", ")}` : "Section 2 Network test เป็น N/A ทั้งหมด (ทำระดับ link)");
 
   facts.spanPairs = spanPairs.map((p) => ({ far: p.far, distance: p.a.distance, rows: [p.a, p.b] }));
+  if (facts.customerAccepted) {
+    // ลูกค้าเซ็น/กรอก Acceptance Date แล้ว → ถือว่าผ่านทั้งหมด ประเด็นที่พบเก็บไว้เป็นข้อมูลอ้างอิงเท่านั้น
+    for (const i of issues) if (i.severity !== "info") { i.origSeverity = i.severity; i.severity = "info"; }
+    issues.unshift({ rule: "A00", level: 0, severity: "info", section: "SATP หน้า 1", page: 1, msg: `ลูกค้าตรวจรับแล้ว (Acceptance Date ${H.acceptanceDate || "-"}${fileInfo.signed || A?.file?.signed ? ", ไฟล์ _Signed" : ""}) → ผ่านทั้งหมด ไม่ต้องตรวจก่อน submit`, who: "ระบบ", accepted: true });
+  }
   return { issues, facts };
 }
 
@@ -287,6 +292,7 @@ export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date())
 export function crossSiteChecks(results) {
   const byCode = new Map(results.map((r) => [norm(r.facts.code), r]));
   for (const r of results) {
+    if (r.facts.customerAccepted) continue;
     const self = norm(r.facts.code);
     for (const p of r.facts.spanPairs || []) {
       const other = [...byCode.keys()].find((k) => k !== self && (k.startsWith(p.far.slice(0, 4)) || p.far.startsWith(k.slice(0, 4))));
@@ -305,6 +311,6 @@ export function crossSiteChecks(results) {
 export function summarize(issues) {
   const s = { fail: 0, warn: 0, info: 0, byLevel: { 1: 0, 2: 0, 3: 0 } };
   for (const i of issues) { s[i.severity]++; if (i.level && i.severity !== "info") s.byLevel[i.level]++; }
-  s.status = s.fail ? "ไม่ผ่าน" : s.warn ? "ผ่านมีข้อสังเกต" : "ผ่าน";
+  s.status = issues.some((i) => i.accepted) ? "ผ่าน (ลูกค้าเซ็นแล้ว)" : s.fail ? "ไม่ผ่าน" : s.warn ? "ผ่านมีข้อสังเกต" : "ผ่าน";
   return s;
 }
