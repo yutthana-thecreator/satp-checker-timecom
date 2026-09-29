@@ -1,0 +1,14 @@
+{
+  "name": "satp-checker-timecom",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "TIME.com Project — ตรวจเอกสาร SATP/Attachment Report ในเบราว์เซอร์ ข้อมูลไม่ออกจากเครื่อง",
+  "scripts": {
+    "test": "node test/run-samples.mjs",
+    "serve": "npx serve -l 8090 ."
+  },
+  "devDependencies": {
+    "pdfjs-dist": "^4.10.38"
+  }
+}

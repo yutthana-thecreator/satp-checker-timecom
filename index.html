@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>SATP Checker — TIME.com Project</title>
+<link rel="stylesheet" href="src/styles.css">
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>SATP Checker <span class="ver" id="ver"></span></h1>
+    <p class="proj">TIME.com Project — Nokia Field Service (AGRID 2.0 / DC2DC)</p>
+    <p class="sub">ตรวจเอกสาร SATP + Attachment Report ในเบราว์เซอร์ — ไฟล์ไม่ถูกส่งออกจากเครื่องนี้</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="card" id="sec-input">
+    <h2>1. โหลดไฟล์</h2>
+    <div id="drop" class="drop" tabindex="0">
+      <p><strong>ลากไฟล์ PDF / zip / โฟลเดอร์มาวางที่นี่</strong> หรือ</p>
+      <p>
+        <label class="btn">เลือกไฟล์ <input type="file" id="file-pick" multiple accept=".pdf,.zip" hidden></label>
+        <label class="btn">เลือกโฟลเดอร์ <input type="file" id="dir-pick" webkitdirectory hidden></label>
+      </p>
+      <p class="hint">ต่อไซต์ต้องมี SATP 1 ไฟล์ + Attachment Report 1 ไฟล์ (ชื่อไฟล์ตาม template TIME) — วางหลายไซต์พร้อมกันได้</p>
+    </div>
+    <div id="file-list" class="file-list"></div>
+    <div class="row">
+      <button id="run" class="btn primary" disabled>ตรวจเอกสาร</button>
+      <button id="clear" class="btn">ล้าง</button>
+      <button id="toggle-criteria" class="btn">เกณฑ์ตรวจ</button>
+      <span id="progress" class="progress"></span>
+    </div>
+    <div id="criteria" class="criteria" hidden></div>
+  </section>
+
+  <section class="card" id="sec-results" hidden>
+    <h2>2. ผลตรวจ</h2>
+    <div class="row">
+      <button id="export" class="btn primary">ดาวน์โหลด Excel</button>
+      <label>ผู้ตรวจ <input id="reviewer" type="text" placeholder="ชื่อ" size="16"></label>
+      <span id="run-meta" class="hint"></span>
+    </div>
+    <table id="summary" class="tbl"></table>
+    <div id="details"></div>
+  </section>
+
+  <section class="card">
+    <h2>ฐานความรู้ — การตัดสินใจของ ROM</h2>
+    <div id="kb"></div>
+  </section>
+
+  <section class="card" id="sec-history">
+    <h2>ประวัติการตรวจ (เก็บในเบราว์เซอร์นี้)</h2>
+    <table id="history" class="tbl"></table>
+    <button id="clear-history" class="btn small">ล้างประวัติ</button>
+  </section>
+</main>
+
+<footer class="wrap hint">
+  โปรไฟล์อ้างอิงและเกณฑ์เริ่มต้นสร้างจากเอกสารตัวอย่าง 46 ไซต์ (AGRID/DC2DC) · รายชื่อไซต์จาก Masterfile <span id="mf-date"></span> · ประวัติและผลตรวจรูปเก็บใน localStorage ของเครื่องนี้เท่านั้น
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script type="module" src="src/app.js"></script>
+</body>
+</html>

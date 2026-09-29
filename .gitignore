@@ -1,0 +1,8 @@
+node_modules/
+test/out/
+test/samples/
+*.pdf
+*.zip
+.DS_Store
+Thumbs.db
+.vercel/
