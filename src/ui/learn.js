@@ -3,14 +3,17 @@
 // 2) profiles: ไซต์ที่ไม่ตรงโปรไฟล์ใด → ROM ยืนยันว่าเอกสารถูกต้อง → บันทึกเป็นโปรไฟล์อ้างอิงใหม่ (L1, L2, …)
 // 3) refImages: รูปที่ ROM กด Accept → เป็นรูปตัวอย่างของ (โปรไฟล์ × section) แสดงเทียบข้างรูปใหม่ · รูปที่ Reject → จำ hash ไว้เตือน
 
+import { cloud, pushRow, deleteRow, pullAll, pushRefImage, deleteRefImage as cloudDeleteRef, downloadThumb } from "./cloud.js";
+
 const KEY = "satp:kb";
 const DB = "satp-kb", STORE = "refimg";
 
 export const kb = load();
 
 function load() {
-  try { return Object.assign({ version: 1, decisions: [], profiles: [], imageDecisions: [] }, JSON.parse(localStorage.getItem(KEY) || "{}")); }
-  catch { return { version: 1, decisions: [], profiles: [], imageDecisions: [] }; }
+  const empty = () => ({ version: 2, decisions: [], profiles: [], imageDecisions: [], sectionStats: {} });
+  try { return Object.assign(empty(), JSON.parse(localStorage.getItem(KEY) || "{}")); }
+  catch { return empty(); }
 }
 export function saveKb() { localStorage.setItem(KEY, JSON.stringify(kb)); }
 
@@ -34,6 +37,7 @@ export function recordDecision(issue, facts, decision, reason, by) {
   const i = kb.decisions.findIndex((x) => x.sig === sig);
   if (i >= 0) { d.count = (kb.decisions[i].count || 1) + 1; kb.decisions[i] = d; } else kb.decisions.push(d);
   saveKb();
+  pushRow("issue_decisions", sig, d);
   return d;
 }
 
@@ -41,7 +45,9 @@ export function forgetDecision(issue, facts) {
   const sig = issueSignature(issue, facts);
   kb.decisions = kb.decisions.filter((d) => d.sig !== sig);
   saveKb();
+  deleteRow("issue_decisions", sig);
 }
+export function deleteDecisionRecord(d) { kb.decisions = kb.decisions.filter((x) => x !== d); saveKb(); deleteRow("issue_decisions", d.sig); }
 
 // ใส่ผลการตัดสินใจเดิมลงในประเด็นของผลตรวจใหม่ (เรียกหลัง checkSite)
 export function applyDecisions(result) {
@@ -64,7 +70,7 @@ export function learnProfile(result, by) {
   if (existing) {
     existing.samples++; existing.sites.push(f.code); existing.by = by; existing.at = new Date().toLocaleString("th-TH");
     for (const k of Object.keys(vals)) existing.values[k] = (existing.values[k] || []).concat(vals[k]);
-    saveKb(); return existing;
+    saveKb(); pushRow("learned_profiles", matchKey(existing.match), existing); return existing;
   }
   const id = "L" + (kb.profiles.length + 1);
   const p = {
@@ -75,8 +81,10 @@ export function learnProfile(result, by) {
   };
   kb.profiles.push(p);
   saveKb();
+  pushRow("learned_profiles", matchKey(p.match), p);
   return p;
 }
+const matchKey = (m) => "M:" + JSON.stringify([m.nodeType, m.power, m.project || "", Object.entries(m.shelves || {}).sort(), [...(m.modules || [])].sort(), m.degrees]);
 function sameMatch(m, f) {
   if (m.nodeType !== f.nodeType || m.power !== f.power) return false;
   if (m.project && m.project !== f.project) return false;
@@ -93,7 +101,7 @@ function collectValues(S) {
   for (const r of S.span) if (r.distance > 0) { v.totalLoss.push(Math.abs(r.totalLoss)); v.lossPerKm.push(Math.abs(r.totalLoss) / r.distance); }
   return v;
 }
-export function forgetProfile(id) { kb.profiles = kb.profiles.filter((p) => p.id !== id); saveKb(); }
+export function forgetProfile(id) { const p = kb.profiles.find((x) => x.id === id); kb.profiles = kb.profiles.filter((x) => x.id !== id); saveKb(); if (p) deleteRow("learned_profiles", matchKey(p.match)); }
 
 // ---------- รูปอ้างอิง (IndexedDB) ----------
 function idb() {
@@ -106,23 +114,49 @@ function idb() {
 function tx(mode, fn) {
   return idb().then((db) => new Promise((res, rej) => { const t = db.transaction(STORE, mode); const s = t.objectStore(STORE); const out = fn(s); t.oncomplete = () => res(out.result ?? out); t.onerror = () => rej(t.error); }));
 }
-const MAX_REF = 3;
-export async function addRefImage({ profile, section, site, page, thumb, hash, by }) {
+// รูปอ้างอิงต่อ (โปรไฟล์ × หัวข้อ): source "signed" = จากไซต์ที่ลูกค้าเซ็นแล้ว (เก็บทั้งหมด) · "rom" = ROM กด Accept (เก็บล่าสุด MAX_ROM_REF รูป)
+const MAX_ROM_REF = 3;
+export const topicOf = (section, topic) => (topic ? `${section} ${topic}` : section);
+export async function addRefImage({ profile, section, topic, site, page, thumb, hash, by, source = "rom" }) {
   const all = await listRefImages();
-  const same = all.filter((x) => x.profile === profile && x.section === section).sort((a, b) => (a.ts || 0) - (b.ts || 0));
-  if (same.some((x) => x.hash === hash)) return;
-  if (same.length >= MAX_REF) await tx("readwrite", (s) => s.delete(same[0].id));
-  const rec = { id: `${profile}|${section}|${hash}`, profile, section, site, page, thumb, hash, by, at: new Date().toLocaleString("th-TH"), ts: Date.now() };
+  const key = topicOf(section, topic);
+  if (all.some((x) => x.profile === profile && x.hash === hash)) return null;
+  if (source === "rom") {
+    const same = all.filter((x) => x.profile === profile && topicOf(x.section, x.topic) === key && (x.source || "rom") === "rom").sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    if (same.length >= MAX_ROM_REF) await tx("readwrite", (s) => s.delete(same[0].id));
+  }
+  const rec = { id: `${profile}|${key}|${hash}`, profile, section, topic: topic || "", site, page, thumb, hash, by, source, at: new Date().toLocaleString("th-TH"), ts: Date.now() };
   await tx("readwrite", (s) => s.put(rec));
+  pushRefImage(rec);
+  return rec;
 }
 export function listRefImages() { return tx("readonly", (s) => s.getAll()).then((r) => r || []); }
-export function removeRefImage(id) { return tx("readwrite", (s) => s.delete(id)); }
-export async function refImagesFor(profile, section) { return (await listRefImages()).filter((x) => x.profile === profile && x.section === section); }
+export async function removeRefImage(id) { const rec = (await listRefImages()).find((x) => x.id === id); await tx("readwrite", (s) => s.delete(id)); if (rec) cloudDeleteRef(rec); }
+export async function refImagesFor(profile, section, topic) { const key = topicOf(section, topic); return (await listRefImages()).filter((x) => x.profile === profile && topicOf(x.section, x.topic) === key); }
+export async function refImagesForProfile(profile) { return (await listRefImages()).filter((x) => x.profile === profile); }
+
+// ---------- สถิติจำนวนรูปต่อ (โปรไฟล์ × หัวข้อ) จากไซต์ที่ลูกค้าเซ็นแล้ว ----------
+export function recordSectionCount(profile, section, topic, site, n) {
+  const key = `${profile}|${topicOf(section, topic)}`;
+  const st = kb.sectionStats[key] || (kb.sectionStats[key] = { profile, section, topic: topic || "", sites: {} });
+  st.sites[site] = n;
+  saveKb();
+  pushRow("section_stats", key, st);
+}
+export function expectedCount(profile, section, topic) {
+  const st = kb.sectionStats[`${profile}|${topicOf(section, topic)}`];
+  if (!st) return null;
+  const ns = Object.values(st.sites).sort((a, b) => a - b);
+  if (!ns.length) return null;
+  return { median: ns[Math.floor(ns.length / 2)], min: ns[0], max: ns[ns.length - 1], sites: ns.length };
+}
 
 export function recordImageDecision({ hash, verdict, reason, site, section, by }) {
   kb.imageDecisions = kb.imageDecisions.filter((d) => d.hash !== hash);
-  kb.imageDecisions.push({ hash, verdict, reason: reason || "", site, section, by: by || "", at: new Date().toLocaleString("th-TH") });
+  const d = { hash, verdict, reason: reason || "", site, section, by: by || "", at: new Date().toLocaleString("th-TH") };
+  kb.imageDecisions.push(d);
   saveKb();
+  pushRow("image_decisions", hash, d);
 }
 export function findImageDecision(hash) { return kb.imageDecisions.find((d) => d.hash === hash) || null; }
 
@@ -138,7 +172,45 @@ export async function importKb(json) {
   for (const p of data.profiles || []) if (!kb.profiles.some((x) => JSON.stringify(x.match) === JSON.stringify(p.match))) { p.id = "L" + (kb.profiles.length + 1); kb.profiles.push(p); merged.added++; }
   for (const d of data.imageDecisions || []) if (!kb.imageDecisions.some((x) => x.hash === d.hash)) { kb.imageDecisions.push(d); merged.added++; }
   for (const r of data.refImages || []) { await tx("readwrite", (s) => s.put(r)); merged.added++; }
+  for (const [k, st] of Object.entries(data.sectionStats || {})) { const cur = kb.sectionStats[k] || (kb.sectionStats[k] = { ...st, sites: {} }); Object.assign(cur.sites, st.sites); merged.added++; }
   saveKb();
   return merged;
 }
-export async function kbStats() { return { decisions: kb.decisions.length, profiles: kb.profiles.length, imageDecisions: kb.imageDecisions.length, refImages: (await listRefImages()).length }; }
+export async function kbStats() { const refs = await listRefImages(); return { decisions: kb.decisions.length, profiles: kb.profiles.length, imageDecisions: kb.imageDecisions.length, refImages: refs.length, signedRefs: refs.filter((x) => x.source === "signed").length, signedSites: new Set(refs.filter((x) => x.source === "signed").map((x) => x.site)).size }; }
+
+// ---------- ซิงก์กับฐานความรู้ร่วมของทีม (Supabase) ----------
+// ดึงจากคลาวด์มารวมกับในเครื่อง (คลาวด์ชนะเมื่อ key ซ้ำ) · รูปย่อที่ยังไม่มีในเครื่องจะถูกดาวน์โหลดครั้งเดียวแล้วเก็บใน IndexedDB
+export async function syncFromCloud(onProgress = () => {}) {
+  if (!cloud.ready) return null;
+  const c = await pullAll();
+  if (!c) return null;
+  const n = { decisions: 0, profiles: 0, imageDecisions: 0, refImages: 0, sectionStats: 0 };
+  for (const d of c.issue_decisions) { const i = kb.decisions.findIndex((x) => x.sig === d.sig); if (i >= 0) kb.decisions[i] = strip(d); else kb.decisions.push(strip(d)); n.decisions++; }
+  for (const d of c.image_decisions) { kb.imageDecisions = kb.imageDecisions.filter((x) => x.hash !== d.hash); kb.imageDecisions.push(strip(d)); n.imageDecisions++; }
+  for (const p of c.learned_profiles) { const i = kb.profiles.findIndex((x) => matchKey(x.match) === p.key); const rec = strip(p); if (i >= 0) { rec.id = kb.profiles[i].id; kb.profiles[i] = rec; } else { rec.id = "L" + (kb.profiles.length + 1); kb.profiles.push(rec); } n.profiles++; }
+  for (const st of c.section_stats) { kb.sectionStats[st.key] = strip(st); n.sectionStats++; }
+  saveKb();
+  const local = new Map((await listRefImages()).map((x) => [x.id, x]));
+  const todo = c.ref_images.filter((r) => !local.has(r.key) || !local.get(r.key).thumb);
+  let done = 0;
+  for (const r of todo) {
+    onProgress(`ดาวน์โหลดรูปอ้างอิง ${++done}/${todo.length}`);
+    try { const thumb = await downloadThumb(r.thumb_path); await tx("readwrite", (s) => s.put({ ...strip(r), id: r.key, thumb })); n.refImages++; } catch (e) { console.warn("thumb", r.key, e?.message || e); }
+  }
+  for (const r of c.ref_images) if (local.has(r.key) && !local.get(r.key).thumb_path) await tx("readwrite", (s) => s.put({ ...local.get(r.key), thumb_path: r.thumb_path }));
+  return n;
+}
+const strip = ({ key, ...rest }) => rest;
+// ส่งของที่มีในเครื่องขึ้นคลาวด์ทั้งหมด (ใช้ครั้งแรกเพื่อย้ายฐานความรู้เดิม)
+export async function uploadLocalToCloud(onProgress = () => {}) {
+  if (!cloud.ready) return null;
+  let n = 0;
+  for (const d of kb.decisions) { await pushRow("issue_decisions", d.sig, d); n++; }
+  for (const d of kb.imageDecisions) { await pushRow("image_decisions", d.hash, d); n++; }
+  for (const p of kb.profiles) { await pushRow("learned_profiles", matchKey(p.match), p); n++; }
+  for (const [k, st] of Object.entries(kb.sectionStats)) { await pushRow("section_stats", k, st); n++; }
+  const refs = await listRefImages();
+  let i = 0;
+  for (const r of refs) { onProgress(`อัปโหลดรูปอ้างอิง ${++i}/${refs.length}`); if (await pushRefImage(r)) n++; }
+  return n;
+}

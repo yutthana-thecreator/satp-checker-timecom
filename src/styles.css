@@ -59,5 +59,11 @@ h2 { font-size: 16px; margin: 0 0 10px; }
 footer { padding: 16px; }
 .ref-strip { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 4px 0 10px; padding: 6px; background: var(--ok-bg); border-radius: 8px; }
 .ref-item { position: relative; display: inline-block; }
-.ref-item img { height: 90px; border: 2px solid var(--ok); border-radius: 4px; }
+.ref-item img { height: 120px; border: 2px solid var(--ok); border-radius: 4px; }
 .ref-item button { position: absolute; top: -6px; right: -6px; padding: 0 5px; }
+header .cloud { margin-top: 8px; font-size: 13px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+header .cloud input { font: inherit; font-size: 13px; padding: 2px 6px; border-radius: 4px; border: 1px solid #fff8; }
+header .cloud .hint { color: #fffc; }
+.topic-head { margin: 10px 0 4px; font-size: 13px; }
+.ref-item small { display: block; font-size: 10px; color: #555; text-align: center; max-width: 120px; }
+.ref-item.signed img { border-color: var(--blue); }

@@ -7,7 +7,8 @@ import { ocrSite } from "./ui/ocr.js";
 import { ocrChecks } from "./engine/ocrRules.js";
 import { summarize } from "./engine/rules.js";
 import { setLearnedProfiles } from "./engine/profiles.js";
-import { kb, applyDecisions, recordDecision, forgetDecision, learnProfile, forgetProfile, addRefImage, refImagesFor, removeRefImage, recordImageDecision, findImageDecision, exportKb, importKb, kbStats } from "./ui/learn.js";
+import { kb, applyDecisions, recordDecision, forgetDecision, deleteDecisionRecord, learnProfile, forgetProfile, addRefImage, refImagesFor, refImagesForProfile, removeRefImage, recordImageDecision, findImageDecision, recordSectionCount, expectedCount, topicOf, exportKb, importKb, kbStats, syncFromCloud, uploadLocalToCloud } from "./ui/learn.js";
+import { cloud, initCloud, signIn, signOut } from "./ui/cloud.js";
 
 const VERSION = "0.2.0";
 const PDFJS_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs";
@@ -37,6 +38,11 @@ async function init() {
   $("#reviewer").addEventListener("change", (e) => localStorage.setItem("satp:reviewer", e.target.value.trim()));
   setLearnedProfiles(kb.profiles);
   renderKb();
+  initCloud().then(async () => {
+    renderCloudBar();
+    cloud.onAuth(() => { renderCloudBar(); if (cloud.ready) pullCloud(); });
+    if (cloud.ready) pullCloud();
+  });
   pdfjs = await import(PDFJS_URL);
   pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
   setupDrop();
@@ -55,6 +61,38 @@ async function init() {
     await new Promise((res) => { const req = indexedDB.deleteDatabase("satp-kb"); req.onsuccess = req.onerror = req.onblocked = () => res(); });
     location.reload();
   });
+}
+
+// ---------- ฐานความรู้ร่วมของทีม (Supabase) ----------
+function renderCloudBar() {
+  const box = $("#cloud"); if (!box) return;
+  if (!cloud.enabled) { box.hidden = true; return; }
+  box.hidden = false;
+  if (cloud.user) {
+    box.replaceChildren(el("span", {}, "☁ ฐานความรู้ทีม: ", el("strong", {}, cloud.user.email)), " ",
+      el("button", { class: "btn small", onclick: () => pullCloud() }, "ซิงก์"), " ",
+      el("button", { class: "btn small", onclick: async () => { await signOut(); renderCloudBar(); } }, "ออกจากระบบ"), " ",
+      el("span", { class: "hint", id: "cloud-status" }));
+    return;
+  }
+  const email = el("input", { type: "email", placeholder: "อีเมล @nokia.com", size: "26" });
+  const status = el("span", { class: "hint" });
+  const btn = el("button", { class: "btn small", onclick: async () => {
+    const v = email.value.trim(); if (!v) return;
+    btn.disabled = true; status.textContent = "กำลังส่ง…";
+    try { await signIn(v); status.textContent = `ส่งลิงก์เข้าใช้ไปที่ ${v} แล้ว — เปิดลิงก์ในอีเมลบนเครื่องนี้`; }
+    catch (e) { status.textContent = "ส่งไม่ได้: " + e.message; btn.disabled = false; }
+  } }, "เข้าใช้ฐานความรู้ทีม");
+  box.replaceChildren(el("span", {}, "☁ ฐานความรู้ทีม (ยังไม่ได้เข้าใช้ — ใช้ข้อมูลในเครื่องนี้เท่านั้น) "), email, " ", btn, " ", status);
+}
+async function pullCloud() {
+  const st = $("#cloud-status"); const say = (t) => { if (st) st.textContent = t; };
+  try {
+    say("กำลังซิงก์…");
+    const n = await syncFromCloud(say);
+    setLearnedProfiles(kb.profiles); renderKb();
+    if (n) say(`ซิงก์แล้ว ${new Date().toLocaleTimeString("th-TH")} · ประเด็น ${n.decisions} · รูปอ้างอิงใหม่ ${n.refImages}`);
+  } catch (e) { say("ซิงก์ไม่ได้: " + (e.message || e)); console.warn(e); }
 }
 
 // ---------- 1. โหลดไฟล์ ----------
@@ -152,6 +190,7 @@ async function runCheck() {
     prog.textContent = `เสร็จ ${results.length} ไซต์ ${errors.length ? `(อ่านไม่ได้ ${errors.length} ไฟล์)` : ""}`;
     renderResults();
     saveHistory();
+    await harvestSignedSites(results, prog);
   } catch (e) {
     prog.textContent = "ผิดพลาด: " + e.message;
     console.error(e);
@@ -248,57 +287,109 @@ function saveReview(r) { localStorage.setItem(reviewKey(r), JSON.stringify(revie
 
 const hashCache = {}; // `${site}|${page}|${idx}` -> hash
 
-async function reviewPanel(r) {
+// หัวข้อย่อยของรูปจากข้อความบนหน้า เช่น "(a) Rack Installation" — ใช้จัดกลุ่มรูปอ้างอิงให้ละเอียดกว่าระดับ section
+function topicFromText(pageText) {
+  const m = /\(([a-g])\)\s*([^*:·(]{2,70})/.exec(pageText || "");
+  return m ? `(${m[1]}) ${m[2].trim().replace(/\s+\S{0,3}$/, "")}` : "";
+}
+
+// ดึงรูปทุก section ที่ต้องตรวจจาก Attachment ของไซต์ → [{section, label, page, idx, im, pageText, topic, hash}]
+async function collectSiteImages(r, onProgress = () => {}) {
   const A = r.site.att;
-  if (!A) return el("p", {}, "ไม่มี Attachment Report");
+  if (!A) return { error: "ไม่มี Attachment Report", items: [] };
   const f = files.find((x) => x.name === r.site.attFile);
-  if (!f) return el("p", {}, "ไม่พบไฟล์ Attachment ในรายการที่โหลด");
+  if (!f) return { error: "ไม่พบไฟล์ Attachment ในรายการที่โหลด", items: [] };
   const doc = await pdfjs.getDocument({ data: f.bytes.slice(), verbosity: 0 }).promise;
   const secs = Object.entries(A.sections).sort((a, b) => a[1] - b[1]);
   const rangeOf = (sec) => { const i = secs.findIndex((s) => s[0] === sec); if (i < 0) return null; return [secs[i][1], i + 1 < secs.length ? secs[i + 1][1] - 1 : doc.numPages]; };
-  const rv = reviews[r.site.key];
-  const wrap = el("div", {});
-  const seen = rv.items.length > 0;
-  const grid = el("div", { class: "review-grid" });
-  let idxAll = 0;
+  const items = [];
   for (const [sec, label] of REVIEW_SECTIONS) {
     const range = rangeOf(sec);
     if (!range) continue;
-    wrap.append(el("h3", {}, label));
-    const refs = await refImagesFor(r.facts.profile || "L:" + r.facts.nearestProfile, label);
-    if (refs.length) wrap.append(el("div", { class: "ref-strip" }, el("span", { class: "hint" }, "รูปอ้างอิงที่ ROM เคย Accept: "), ...refs.map((x) => el("span", { class: "ref-item" }, el("img", { src: x.thumb, title: `${x.site} หน้า ${x.page} · ${x.by || ""} ${x.at}` }), el("button", { class: "btn small", onclick: async (e) => { await removeRefImage(x.id); e.target.parentElement.remove(); renderKb(); } }, "×")))));
-    const g = el("div", { class: "review-grid" });
     for (let p = range[0]; p <= range[1]; p++) {
+      onProgress(`${r.facts.code}: อ่านรูปหน้า ${p}`);
       const page = await doc.getPage(p);
-      const caps = (A.pages?.[p - 1]?.text) || "";
       const imgs = await pageImageCanvases(page);
       const pageText = (r.site.pagesAtt?.[p - 1]?.lines || []).filter((l) => /^\([a-g]\)|^Name:|SHELF|Power [AB]|Rack to|Shelf to/i.test(l)).join(" · ");
+      const topic = topicFromText(pageText);
       imgs.forEach((im, idx) => {
         const key = `${r.site.key}|${p}|${idx}`;
         const h = hashCache[key]?.h || (hashCache[key] = { h: aHash(im.canvas), w: im.width, hh: im.height }).h;
-        const blur = blurScore(im.canvas);
-        let item = rv.items.find((x) => x.page === p && x.idx === idx);
-        if (!item) { item = { section: label, page: p, idx, verdict: "", reason: "", by: "", at: "", hash: h }; rv.items.push(item); }
-        item.hash = h;
-        const auto = [];
-        // รูปซ้ำ = ขนาดพิกเซลเท่ากันและ hash ต่างไม่เกิน 4/256 บิต (ไม่นับรูปเดียวกันที่ถูกวางซ้ำในหน้าเดียว)
-        for (const [k2, v2] of Object.entries(hashCache)) if (k2 !== key && v2.w === im.width && v2.hh === im.height && k2.split("|").slice(0, 2).join("|") !== `${r.site.key}|${p}` && hamming(h, v2.h) <= 4) auto.push(`เหมือนรูป ${k2.split("|")[0]} หน้า ${k2.split("|")[1]}`);
-        if (blur < 15) auto.push(`ภาพอาจเบลอ (คมชัด ${blur.toFixed(0)})`);
-        const prev = findImageDecision(h);
-        if (prev && prev.verdict === "reject") auto.push(`รูปนี้เคยถูก Reject ที่ ${prev.site}: ${prev.reason} (${prev.by || ""})`);
-        item.auto = auto.join("; ");
-        g.append(reviewCard(r, item, im, pageText));
+        items.push({ section: label, label, page: p, idx, im, pageText, topic, hash: h, key });
       });
       page.cleanup();
     }
-    wrap.append(g);
+  }
+  await doc.destroy();
+  return { items };
+}
+
+// ไซต์ที่ลูกค้าเซ็นแล้ว = ลูกค้ายืนยันว่ารูปชุดนี้ใช้ได้ → เก็บทุกรูปเป็นรูปอ้างอิงของ (โปรไฟล์ × หัวข้อ) และจำจำนวนรูปต่อหัวข้อ
+async function harvestSignedSites(results, prog) {
+  const signed = results.filter((r) => r.facts.customerAccepted && r.site.att);
+  if (!signed.length) return;
+  let added = 0;
+  for (const r of signed) {
+    const profileKey = r.facts.profile || "L:" + r.facts.nearestProfile;
+    const { items } = await collectSiteImages(r, (t) => { prog.textContent = `เก็บรูปอ้างอิงจากไซต์ที่ลูกค้าเซ็นแล้ว — ${t}`; });
+    const counts = {};
+    for (const it of items) {
+      counts[topicOf(it.section, it.topic)] = (counts[topicOf(it.section, it.topic)] || 0) + 1;
+      const rec = await addRefImage({ profile: profileKey, section: it.section, topic: it.topic, site: r.facts.code, page: it.page, thumb: thumb(it.im.canvas, 320), hash: it.hash, by: "ลูกค้าเซ็นแล้ว", source: "signed" });
+      if (rec) added++;
+    }
+    const seenTopics = new Set();
+    for (const it of items) { const k = topicOf(it.section, it.topic); if (seenTopics.has(k)) continue; seenTopics.add(k); recordSectionCount(profileKey, it.section, it.topic, r.facts.code, counts[k]); }
+  }
+  prog.textContent = `เสร็จ ${results.length} ไซต์ · เก็บรูปอ้างอิงจากไซต์ที่ลูกค้าเซ็นแล้ว ${signed.length} ไซต์ (รูปใหม่ ${added})`;
+  renderKb();
+}
+
+async function reviewPanel(r) {
+  const profileKey = r.facts.profile || "L:" + r.facts.nearestProfile;
+  const { error, items } = await collectSiteImages(r);
+  if (error) return el("p", {}, error);
+  const rv = reviews[r.site.key];
+  const wrap = el("div", {});
+  const allRefs = await refImagesForProfile(profileKey);
+  const signedRefs = allRefs.filter((x) => x.source === "signed" && x.site !== r.facts.code);
+  let curLabel = null, curTopic = null, g = null;
+  for (const it of items) {
+    if (it.label !== curLabel) { curLabel = it.label; curTopic = null; wrap.append(el("h3", {}, it.label)); }
+    const tkey = topicOf(it.section, it.topic);
+    if (tkey !== curTopic) {
+      curTopic = tkey;
+      const n = items.filter((x) => topicOf(x.section, x.topic) === tkey).length;
+      const exp = expectedCount(profileKey, it.section, it.topic);
+      const refs = allRefs.filter((x) => topicOf(x.section, x.topic) === tkey);
+      const head = el("div", { class: "topic-head" }, el("strong", {}, it.topic || it.label), ` · ${n} รูป`);
+      if (exp) head.append(el("span", { class: exp.median !== n ? "auto-note" : "hint" }, ` — ไซต์ที่ลูกค้าเซ็นแล้วในโปรไฟล์นี้มี ${exp.min === exp.max ? exp.median : `${exp.min}–${exp.max}`} รูป (${exp.sites} ไซต์)${exp.median !== n ? " ← จำนวนต่างจากตัวอย่าง" : ""}`));
+      wrap.append(head);
+      if (refs.length) wrap.append(el("div", { class: "ref-strip" }, el("span", { class: "hint" }, "รูปอ้างอิง: "), ...refs.slice(0, 8).map((x) => el("span", { class: "ref-item " + (x.source === "signed" ? "signed" : "") }, el("img", { src: x.thumb, title: `${x.site} หน้า ${x.page} · ${x.by || ""} ${x.at}` }), el("small", {}, x.source === "signed" ? `ลูกค้าเซ็น · ${x.site}` : `ROM · ${x.site}`), el("button", { class: "btn small", title: "ถอดออกจากรูปอ้างอิง", onclick: async (e) => { await removeRefImage(x.id); e.target.parentElement.remove(); renderKb(); } }, "×")))));
+      g = el("div", { class: "review-grid" });
+      wrap.append(g);
+    }
+    const { im, page: p, idx, hash: h, key } = it;
+    const blur = blurScore(im.canvas);
+    let item = rv.items.find((x) => x.page === p && x.idx === idx);
+    if (!item) { item = { section: it.label, page: p, idx, verdict: "", reason: "", by: "", at: "", hash: h }; rv.items.push(item); }
+    item.hash = h; item.topic = it.topic;
+    const auto = [];
+    // รูปซ้ำ = ขนาดพิกเซลเท่ากันและ hash ต่างไม่เกิน 4/256 บิต (ไม่นับรูปเดียวกันที่ถูกวางซ้ำในหน้าเดียว)
+    for (const [k2, v2] of Object.entries(hashCache)) if (k2 !== key && v2.w === im.width && v2.hh === im.height && k2.split("|").slice(0, 2).join("|") !== `${r.site.key}|${p}` && hamming(h, v2.h) <= 4) auto.push(`เหมือนรูป ${k2.split("|")[0]} หน้า ${k2.split("|")[1]}`);
+    const reused = signedRefs.find((x) => hamming(h, x.hash) <= 4);
+    if (reused) auto.push(`เหมือนรูปของไซต์ ${reused.site} ที่ลูกค้าเซ็นแล้ว (หน้า ${reused.page}) — รูปถูกนำมาใช้ซ้ำ?`);
+    if (blur < 15) auto.push(`ภาพอาจเบลอ (คมชัด ${blur.toFixed(0)})`);
+    const prev = findImageDecision(h);
+    if (prev && prev.verdict === "reject") auto.push(`รูปนี้เคยถูก Reject ที่ ${prev.site}: ${prev.reason} (${prev.by || ""})`);
+    item.auto = auto.join("; ");
+    g.append(reviewCard(r, item, im, it.pageText));
   }
   if (!rv.items.length) wrap.append(el("p", {}, "ไม่พบรูปใน Attachment"));
   saveReview(r);
-  await doc.destroy();
   const bulk = el("div", { class: "row" },
     el("button", { class: "btn small", onclick: () => { for (const it of rv.items) if (!it.verdict) setVerdict(r, it, "accept"); wrap.querySelectorAll(".review-item").forEach((c) => c.dispatchEvent(new Event("refresh"))); } }, "Accept ที่เหลือทั้งหมด"),
-    el("span", { class: "hint" }, "ไซต์จะ 'ผ่าน' ส่วนรูปเมื่อทุกรูปถูก Accept — Reject ต้องระบุเหตุผล"));
+    el("span", { class: "hint" }, `ไซต์จะ 'ผ่าน' ส่วนรูปเมื่อทุกรูปถูก Accept — Reject ต้องระบุเหตุผล · รูปอ้างอิงของโปรไฟล์นี้ ${allRefs.length} รูป (จากไซต์ที่ลูกค้าเซ็นแล้ว ${signedRefs.length})`));
   wrap.prepend(bulk);
   return wrap;
 }
@@ -309,7 +400,7 @@ function setVerdict(r, item, v, reason, canvas) {
   saveReview(r);
   // เรียนรู้: Accept → เก็บเป็นรูปอ้างอิงของ (โปรไฟล์ × section) · Reject → จำ hash + เหตุผล
   const profileKey = r.facts.profile || "L:" + r.facts.nearestProfile;
-  if (v === "accept" && canvas) addRefImage({ profile: profileKey, section: item.section, site: r.facts.code, page: item.page, thumb: thumb(canvas, 320), hash: item.hash, by: item.by }).then(renderKb);
+  if (v === "accept" && canvas) addRefImage({ profile: profileKey, section: item.section, topic: item.topic || "", site: r.facts.code, page: item.page, thumb: thumb(canvas, 320), hash: item.hash, by: item.by, source: "rom" }).then(renderKb);
   recordImageDecision({ hash: item.hash, verdict: v, reason: item.reason, site: r.facts.code, section: item.section, by: item.by });
   renderKb();
 }
@@ -373,15 +464,17 @@ function renderSummaryRow(r) {
 async function renderKb() {
   const box = $("#kb"); if (!box) return;
   const st = await kbStats();
-  const head = el("p", {}, `การตัดสินใจประเด็น ${st.decisions} · โปรไฟล์ที่เรียนรู้ ${st.profiles} · รูปอ้างอิง ${st.refImages} · รูปที่เคยตัดสิน ${st.imageDecisions}`);
+  const head = el("p", {}, `การตัดสินใจประเด็น ${st.decisions} · โปรไฟล์ที่เรียนรู้ ${st.profiles} · รูปอ้างอิง ${st.refImages} (จากไซต์ที่ลูกค้าเซ็นแล้ว ${st.signedRefs} รูป / ${st.signedSites} ไซต์) · รูปที่เคยตัดสิน ${st.imageDecisions}`);
   const dt = el("table", { class: "tbl" }, el("tr", {}, ...["กฎ", "Section", "ตัดสินใจ", "เหตุผล", "ตัวอย่างประเด็น", "โดย", "เมื่อ", "ครั้ง", ""].map((h) => el("th", {}, h))));
-  for (const d of kb.decisions.slice().reverse().slice(0, 30)) dt.append(el("tr", {}, el("td", {}, d.rule), el("td", {}, d.section), el("td", {}, el("span", { class: "pill " + (d.decision === "accept" ? "ok" : "warn") }, d.decision === "accept" ? "ยอมรับ" : "ยืนยันปัญหา")), el("td", {}, d.reason), el("td", { class: "hint msg" }, d.example), el("td", {}, d.by), el("td", {}, d.at), el("td", {}, d.count || 1), el("td", {}, el("button", { class: "btn small", onclick: () => { kb.decisions = kb.decisions.filter((x) => x !== d); localStorage.setItem("satp:kb", JSON.stringify(kb)); renderKb(); } }, "ลบ"))));
+  for (const d of kb.decisions.slice().reverse().slice(0, 30)) dt.append(el("tr", {}, el("td", {}, d.rule), el("td", {}, d.section), el("td", {}, el("span", { class: "pill " + (d.decision === "accept" ? "ok" : "warn") }, d.decision === "accept" ? "ยอมรับ" : "ยืนยันปัญหา")), el("td", {}, d.reason), el("td", { class: "hint msg" }, d.example), el("td", {}, d.by), el("td", {}, d.at), el("td", {}, d.count || 1), el("td", {}, el("button", { class: "btn small", onclick: () => { deleteDecisionRecord(d); renderKb(); } }, "ลบ"))));
   const pt = el("table", { class: "tbl" }, el("tr", {}, ...["โปรไฟล์", "ชื่อ", "ตัวอย่าง", "ไซต์", "โดย", ""].map((h) => el("th", {}, h))));
   for (const p of kb.profiles) pt.append(el("tr", {}, el("td", {}, p.id), el("td", {}, p.name), el("td", {}, p.samples), el("td", {}, (p.sites || []).join(", ")), el("td", {}, `${p.by || ""} ${p.at || ""}`), el("td", {}, el("button", { class: "btn small", onclick: () => { forgetProfile(p.id); setLearnedProfiles(kb.profiles); renderKb(); } }, "ลบ"))));
   const exp = el("button", { class: "btn", onclick: async () => { const blob = new Blob([await exportKb()], { type: "application/json" }); const a = el("a", { href: URL.createObjectURL(blob), download: `satp_knowledge_${new Date().toISOString().slice(0, 10)}.json` }); a.click(); } }, "ส่งออกฐานความรู้ (JSON)");
   const clr = el("button", { class: "btn small danger", onclick: async () => { if (!confirm("ล้างฐานความรู้ทั้งหมด (การตัดสินใจ, โปรไฟล์ที่เรียนรู้, รูปอ้างอิง)? แนะนำให้ส่งออกก่อน")) return; kb.decisions = []; kb.profiles = []; kb.imageDecisions = []; localStorage.setItem("satp:kb", JSON.stringify(kb)); await new Promise((res) => { const req = indexedDB.deleteDatabase("satp-kb"); req.onsuccess = req.onerror = req.onblocked = () => res(); }); setLearnedProfiles([]); renderKb(); } }, "ล้างฐานความรู้");
   const imp = el("label", { class: "btn" }, "นำเข้าฐานความรู้", el("input", { type: "file", accept: ".json", hidden: "", onchange: async (e) => { const f = e.target.files[0]; if (!f) return; const m = await importKb(await f.text()); setLearnedProfiles(kb.profiles); alert(`นำเข้าแล้ว ${m.added} รายการ`); renderKb(); } }));
-  box.replaceChildren(head, el("div", { class: "row" }, exp, imp, clr, el("span", { class: "hint" }, "ฐานความรู้อยู่ในเบราว์เซอร์เครื่องนี้ — ส่งออกไฟล์ให้ทีมนำเข้าเพื่อใช้ร่วมกัน (ไม่มีข้อมูลเอกสาร มีแต่ลายเซ็นประเด็น, รูปย่อที่ Accept และค่าที่วัด)")),
+  const up = cloud.ready ? el("button", { class: "btn small", onclick: async (e) => { if (!confirm("ส่งฐานความรู้ในเครื่องนี้ทั้งหมดขึ้นคลาวด์ของทีม? (รายการที่มีอยู่แล้วจะถูกเขียนทับด้วยของเครื่องนี้)")) return; e.target.disabled = true; const n = await uploadLocalToCloud((t) => { e.target.textContent = t; }); e.target.textContent = `อัปโหลดแล้ว ${n} รายการ`; } }, "อัปโหลดฐานความรู้ในเครื่องขึ้นคลาวด์") : null;
+  const note = cloud.ready ? "ฐานความรู้ซิงก์กับคลาวด์ของทีม — ทุกการตัดสินใจและรูปอ้างอิงใหม่ขึ้นคลาวด์ทันที ปุ่มล้างมีผลเฉพาะเครื่องนี้" : cloud.enabled ? "ยังไม่ได้เข้าใช้ฐานความรู้ทีม — ข้อมูลอยู่ในเครื่องนี้ (เข้าใช้ได้ที่แถบด้านบน)" : "ฐานความรู้อยู่ในเบราว์เซอร์เครื่องนี้ — ส่งออกไฟล์ให้ทีมนำเข้าเพื่อใช้ร่วมกัน (ไม่มีข้อมูลเอกสาร มีแต่ลายเซ็นประเด็น, รูปย่อที่ Accept และค่าที่วัด)";
+  box.replaceChildren(head, el("div", { class: "row" }, exp, imp, up, clr, el("span", { class: "hint" }, note)),
     el("h3", {}, "การตัดสินใจประเด็น (ล่าสุด 30)"), dt, el("h3", {}, "โปรไฟล์ที่เรียนรู้จาก ROM"), pt.children.length > 1 ? pt : el("p", { class: "hint" }, "ยังไม่มี — ไซต์ที่ไม่ตรงโปรไฟล์ P1–P5 จะมีปุ่ม 'ROM ยืนยัน: ใช้ไซต์นี้เป็นอ้างอิง'"));
 }
 
