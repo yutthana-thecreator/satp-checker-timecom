@@ -7,7 +7,7 @@ import { ocrSite } from "./ui/ocr.js";
 import { ocrChecks } from "./engine/ocrRules.js";
 import { summarize } from "./engine/rules.js";
 import { setLearnedProfiles } from "./engine/profiles.js";
-import { kb, applyDecisions, recordDecision, forgetDecision, deleteDecisionRecord, learnProfile, forgetProfile, addRefImage, refImagesFor, refImagesForProfile, removeRefImage, listRefKeys, isReferenceSource, recordImageDecision, findImageDecision, recordSectionCount, expectedCount, topicOf, exportKb, importKb, kbStats, syncFromCloud, uploadLocalToCloud } from "./ui/learn.js";
+import { kb, applyDecisions, recordDecision, forgetDecision, deleteDecisionRecord, learnProfile, forgetProfile, addRefImage, refImagesFor, refImagesForProfile, ensureThumbs, removeRefImage, listRefKeys, isReferenceSource, recordImageDecision, findImageDecision, recordSectionCount, expectedCount, topicOf, exportKb, importKb, kbStats, syncFromCloud, uploadLocalToCloud } from "./ui/learn.js";
 import { cloud, initCloud } from "./ui/cloud.js";
 
 const VERSION = "0.2.0";
@@ -76,7 +76,7 @@ async function pullCloud() {
     say("กำลังซิงก์…");
     const n = await syncFromCloud(say);
     setLearnedProfiles(kb.profiles); renderKb();
-    if (n) say(`ซิงก์แล้ว ${new Date().toLocaleTimeString("th-TH")} · ประเด็น ${n.decisions} · รูปอ้างอิงใหม่ ${n.refImages}`);
+    if (n) say(`ซิงก์แล้ว ${new Date().toLocaleTimeString("th-TH")} · ประเด็น ${n.decisions} · รูปอ้างอิงใหม่ ${n.refImages}${n.removed ? ` · ถอดออก ${n.removed}` : ""}`);
   } catch (e) { say("ซิงก์ไม่ได้: " + (e.message || e)); console.warn(e); }
 }
 
@@ -224,7 +224,12 @@ function showDetail(r) {
   const tabs = el("div", { class: "tabs" });
   const body = el("div", {});
   const tabIssues = el("button", { class: "active", onclick: () => { activate(tabIssues); body.replaceChildren(issuesTable(r)); } }, `ประเด็น (${r.issues.filter((i) => i.severity !== "info").length})`);
-  const tabReview = el("button", { onclick: async () => { activate(tabReview); body.replaceChildren(el("p", { class: "hint" }, "กำลังดึงรูปจาก Attachment…")); body.replaceChildren(await reviewPanel(r)); } }, "ตรวจรูป (Accept/Reject)");
+  const tabReview = el("button", { onclick: async () => {
+    activate(tabReview);
+    const st = el("p", { class: "hint" }, "กำลังดึงรูปจาก Attachment…"); body.replaceChildren(st);
+    await ensureThumbs(r.facts.profile || "L:" + r.facts.nearestProfile, (t) => { st.textContent = t; });
+    body.replaceChildren(await reviewPanel(r));
+  } }, "ตรวจรูป (Accept/Reject)");
   const tabOcr = el("button", { onclick: () => { activate(tabOcr); const wrap = el("div", {}); body.replaceChildren(wrap); ocrPanel(r, wrap); } }, "OCR screenshot");
   const activate = (b) => { for (const x of tabs.children) x.classList.toggle("active", x === b); };
   if (r.facts.customerAccepted) tabs.append(tabIssues, el("span", { class: "hint" }, "ลูกค้าตรวจรับแล้ว — ไม่ต้องตรวจรูป / OCR"));
@@ -365,7 +370,7 @@ async function reviewPanel(r) {
       curTopic = tkey;
       const n = items.filter((x) => topicOf(x.section, x.topic) === tkey).length;
       const exp = expectedCount(profileKey, it.section, it.topic);
-      const refs = allRefs.filter((x) => topicOf(x.section, x.topic) === tkey);
+      const refs = allRefs.filter((x) => topicOf(x.section, x.topic) === tkey && x.thumb);
       const head = el("div", { class: "topic-head" }, el("strong", {}, it.topic || it.label), ` · ${n} รูป`);
       const outOfRange = exp && (n < exp.min || n > exp.max);
       if (exp) head.append(el("span", { class: outOfRange ? "auto-note" : "hint" }, ` — ไซต์ตัวอย่างในโปรไฟล์นี้มี ${exp.min === exp.max ? exp.median : `${exp.min}–${exp.max}`} รูป (ค่ากลาง ${exp.median}, ${exp.sites} ไซต์)${outOfRange ? " ← จำนวนต่างจากตัวอย่าง" : ""}`));

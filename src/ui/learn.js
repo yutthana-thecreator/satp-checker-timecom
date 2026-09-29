@@ -116,7 +116,7 @@ function idb() {
   });
 }
 function tx(mode, fn) {
-  return idb().then((db) => new Promise((res, rej) => { const t = db.transaction(STORE, mode); const s = t.objectStore(STORE); const out = fn(s); t.oncomplete = () => res(out.result ?? out); t.onerror = () => rej(t.error); }));
+  return idb().then((db) => new Promise((res, rej) => { const t = db.transaction(STORE, mode); const s = t.objectStore(STORE); const out = fn(s); t.oncomplete = () => res(out && out.result !== undefined ? out.result : out); t.onerror = () => rej(t.error); }));
 }
 // รูปอ้างอิงต่อ (โปรไฟล์ × หัวข้อ): source "signed" = จากไซต์ที่ลูกค้าเซ็นแล้ว (เก็บทั้งหมด) · "rom" = ROM กด Accept (เก็บล่าสุด MAX_ROM_REF รูป)
 const MAX_ROM_REF = 3;
@@ -176,7 +176,7 @@ export function findImageDecision(hash) { return kb.imageDecisions.find((d) => d
 
 // ---------- ส่งออก / นำเข้า ----------
 export async function exportKb() {
-  const refImages = await listRefImages();
+  const refImages = (await listRefImages()).filter((x) => x.thumb);
   return JSON.stringify({ ...kb, refImages, exportedAt: new Date().toISOString() }, null, 1);
 }
 export async function importKb(json) {
@@ -209,20 +209,35 @@ export async function syncFromCloud(onProgress = () => {}) {
   for (const p of c.learned_profiles) { const i = kb.profiles.findIndex((x) => matchKey(x.match) === p.key); const rec = strip(p); if (i >= 0) { rec.id = kb.profiles[i].id; kb.profiles[i] = rec; } else { rec.id = "L" + (kb.profiles.length + 1); kb.profiles.push(rec); } n.profiles++; }
   for (const st of c.section_stats) { kb.sectionStats[st.key] = strip(st); n.sectionStats++; }
   saveKb();
+  // เก็บเฉพาะข้อมูลย่อของรูปอ้างอิงใหม่ (ไม่มีรูปย่อ) — รูปย่อจะถูกดาวน์โหลดเมื่อเปิดดูโปรไฟล์นั้นครั้งแรก (ensureThumbs)
   const localKeys = new Set(await listRefKeys());
   const todo = c.ref_images.filter((r) => !localKeys.has(r.key));
+  if (todo.length) {
+    onProgress(`รับข้อมูลรูปอ้างอิงใหม่ ${todo.length} รูป`);
+    await tx("readwrite", (s) => { for (const r of todo) s.put({ ...strip(r), id: r.key, thumb: null }); return null; });
+    n.refImages = todo.length;
+    metaCache = null;
+  }
+  // รูปที่ถูกลบจากคลาวด์ (ROM ถอดออกจากเครื่องอื่น) → ลบในเครื่องด้วย
+  const cloudKeys = new Set(c.ref_images.map((r) => r.key));
+  const gone = [...localKeys].filter((k) => !cloudKeys.has(k));
+  if (gone.length) { await tx("readwrite", (s) => { for (const k of gone) s.delete(k); return null; }); metaCache = null; n.removed = gone.length; }
+  return n;
+}
+// ดาวน์โหลดรูปย่อที่ยังไม่มีของโปรไฟล์นี้ (ขนาน 6) — เรียกก่อนแสดงแท็บตรวจรูป
+export async function ensureThumbs(profile, onProgress = () => {}) {
+  const missing = (await refImagesForProfile(profile)).filter((x) => !x.thumb && x.thumb_path);
+  if (!missing.length || !cloud.ready) return 0;
   let done = 0;
-  // ดาวน์โหลดรูปย่อขนานกัน 6 รูป
-  const queue = todo.slice();
+  const queue = missing.slice();
   await Promise.all(Array.from({ length: 6 }, async () => {
     while (queue.length) {
       const r = queue.shift();
-      try { const thumb = await downloadThumb(r.thumb_path); await tx("readwrite", (s) => s.put({ ...strip(r), id: r.key, thumb })); n.refImages++; } catch (e) { console.warn("thumb", r.key, e?.message || e); }
-      onProgress(`ดาวน์โหลดรูปอ้างอิง ${++done}/${todo.length}`);
+      try { r.thumb = await downloadThumb(r.thumb_path); await tx("readwrite", (s) => s.put(r)); } catch (e) { console.warn("thumb", r.id, e?.message || e); }
+      onProgress(`ดาวน์โหลดรูปอ้างอิงของโปรไฟล์ ${profile}: ${++done}/${missing.length}`);
     }
   }));
-  if (todo.length) metaCache = null;
-  return n;
+  return done;
 }
 const strip = ({ key, ...rest }) => rest;
 // ส่งของที่มีในเครื่องขึ้นคลาวด์ทั้งหมด (ใช้ครั้งแรกเพื่อย้ายฐานความรู้เดิม)
