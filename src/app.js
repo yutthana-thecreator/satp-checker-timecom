@@ -48,7 +48,14 @@ async function init() {
   $("#clear").addEventListener("click", () => { files = []; renderFileList(); });
   $("#toggle-criteria").addEventListener("click", () => { $("#criteria").hidden = !$("#criteria").hidden; });
   $("#export").addEventListener("click", exportExcel);
-  $("#clear-history").addEventListener("click", () => { localStorage.removeItem("satp:history"); renderHistory(); });
+  $("#clear-history").addEventListener("click", () => { if (confirm("ล้างประวัติการตรวจทั้งหมดในเบราว์เซอร์นี้?")) { localStorage.removeItem("satp:history"); renderHistory(); } });
+  $("#clear-reviews").addEventListener("click", () => { if (!confirm("ล้างผล Accept/Reject ของทุกไซต์ในเบราว์เซอร์นี้? (รูปอ้างอิงในฐานความรู้ยังอยู่)")) return; for (const k of Object.keys(localStorage)) if (k.startsWith("satp:review:")) localStorage.removeItem(k); for (const k of Object.keys(reviews)) delete reviews[k]; if (run) { for (const r of run.results) reviews[r.site.key] = { items: [] }; renderResults(); } });
+  $("#clear-all").addEventListener("click", async () => {
+    if (!confirm("ล้างข้อมูลทั้งหมดในเบราว์เซอร์นี้: ประวัติ, ผลตรวจรูป, ฐานความรู้ (การตัดสินใจ/โปรไฟล์ที่เรียนรู้/รูปอ้างอิง), เกณฑ์ที่แก้ไว้, ชื่อผู้ตรวจ? แนะนำให้กด 'ส่งออกฐานความรู้' ก่อน")) return;
+    for (const k of Object.keys(localStorage)) if (k.startsWith("satp:")) localStorage.removeItem(k);
+    await new Promise((res) => { const req = indexedDB.deleteDatabase("satp-kb"); req.onsuccess = req.onerror = req.onblocked = () => res(); });
+    location.reload();
+  });
 }
 
 // ---------- 1. โหลดไฟล์ ----------
@@ -364,8 +371,9 @@ async function renderKb() {
   const pt = el("table", { class: "tbl" }, el("tr", {}, ...["โปรไฟล์", "ชื่อ", "ตัวอย่าง", "ไซต์", "โดย", ""].map((h) => el("th", {}, h))));
   for (const p of kb.profiles) pt.append(el("tr", {}, el("td", {}, p.id), el("td", {}, p.name), el("td", {}, p.samples), el("td", {}, (p.sites || []).join(", ")), el("td", {}, `${p.by || ""} ${p.at || ""}`), el("td", {}, el("button", { class: "btn small", onclick: () => { forgetProfile(p.id); setLearnedProfiles(kb.profiles); renderKb(); } }, "ลบ"))));
   const exp = el("button", { class: "btn", onclick: async () => { const blob = new Blob([await exportKb()], { type: "application/json" }); const a = el("a", { href: URL.createObjectURL(blob), download: `satp_knowledge_${new Date().toISOString().slice(0, 10)}.json` }); a.click(); } }, "ส่งออกฐานความรู้ (JSON)");
+  const clr = el("button", { class: "btn small danger", onclick: async () => { if (!confirm("ล้างฐานความรู้ทั้งหมด (การตัดสินใจ, โปรไฟล์ที่เรียนรู้, รูปอ้างอิง)? แนะนำให้ส่งออกก่อน")) return; kb.decisions = []; kb.profiles = []; kb.imageDecisions = []; localStorage.setItem("satp:kb", JSON.stringify(kb)); await new Promise((res) => { const req = indexedDB.deleteDatabase("satp-kb"); req.onsuccess = req.onerror = req.onblocked = () => res(); }); setLearnedProfiles([]); renderKb(); } }, "ล้างฐานความรู้");
   const imp = el("label", { class: "btn" }, "นำเข้าฐานความรู้", el("input", { type: "file", accept: ".json", hidden: "", onchange: async (e) => { const f = e.target.files[0]; if (!f) return; const m = await importKb(await f.text()); setLearnedProfiles(kb.profiles); alert(`นำเข้าแล้ว ${m.added} รายการ`); renderKb(); } }));
-  box.replaceChildren(head, el("div", { class: "row" }, exp, imp, el("span", { class: "hint" }, "ฐานความรู้อยู่ในเบราว์เซอร์เครื่องนี้ — ส่งออกไฟล์ให้ทีมนำเข้าเพื่อใช้ร่วมกัน (ไม่มีข้อมูลเอกสาร มีแต่ลายเซ็นประเด็น, รูปย่อที่ Accept และค่าที่วัด)")),
+  box.replaceChildren(head, el("div", { class: "row" }, exp, imp, clr, el("span", { class: "hint" }, "ฐานความรู้อยู่ในเบราว์เซอร์เครื่องนี้ — ส่งออกไฟล์ให้ทีมนำเข้าเพื่อใช้ร่วมกัน (ไม่มีข้อมูลเอกสาร มีแต่ลายเซ็นประเด็น, รูปย่อที่ Accept และค่าที่วัด)")),
     el("h3", {}, "การตัดสินใจประเด็น (ล่าสุด 30)"), dt, el("h3", {}, "โปรไฟล์ที่เรียนรู้จาก ROM"), pt.children.length > 1 ? pt : el("p", { class: "hint" }, "ยังไม่มี — ไซต์ที่ไม่ตรงโปรไฟล์ P1–P5 จะมีปุ่ม 'ROM ยืนยัน: ใช้ไซต์นี้เป็นอ้างอิง'"));
 }
 
@@ -384,9 +392,10 @@ function saveHistory() {
 function renderHistory() {
   const h = JSON.parse(localStorage.getItem("satp:history") || "[]");
   const t = $("#history");
-  t.replaceChildren(el("tr", {}, ...["เมื่อ", "ไซต์", "โฟลเดอร์", "โปรไฟล์", "สถานะ", "ไม่ผ่าน", "เตือน"].map((x) => el("th", {}, x))));
-  for (const x of h.slice(0, 50)) t.append(el("tr", {}, el("td", {}, x.when), el("td", {}, x.code), el("td", {}, x.folder), el("td", {}, x.profile), el("td", {}, pill(x.status)), el("td", {}, x.fail), el("td", {}, x.warn)));
-  if (!h.length) t.append(el("tr", {}, el("td", { colspan: 7, class: "hint" }, "ยังไม่มีประวัติ")));
+  t.replaceChildren(el("tr", {}, ...["เมื่อ", "ไซต์", "โฟลเดอร์", "โปรไฟล์", "สถานะ", "ไม่ผ่าน", "เตือน", ""].map((x) => el("th", {}, x))));
+  h.slice(0, 50).forEach((x, i) => t.append(el("tr", {}, el("td", {}, x.when), el("td", {}, x.code), el("td", {}, x.folder), el("td", {}, x.profile), el("td", {}, pill(x.status)), el("td", {}, x.fail), el("td", {}, x.warn),
+    el("td", {}, el("button", { class: "btn small", title: "ลบรายการนี้", onclick: () => { h.splice(i, 1); localStorage.setItem("satp:history", JSON.stringify(h)); renderHistory(); } }, "ลบ")))));
+  if (!h.length) t.append(el("tr", {}, el("td", { colspan: 8, class: "hint" }, "ยังไม่มีประวัติ")));
 }
 
 // ---------- ทดสอบในเครื่อง (localhost เท่านั้น) ----------
