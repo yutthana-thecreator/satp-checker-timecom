@@ -8,7 +8,7 @@ import { ocrChecks } from "./engine/ocrRules.js";
 import { summarize } from "./engine/rules.js";
 import { setLearnedProfiles } from "./engine/profiles.js";
 import { kb, applyDecisions, recordDecision, forgetDecision, deleteDecisionRecord, learnProfile, forgetProfile, addRefImage, refImagesFor, refImagesForProfile, removeRefImage, recordImageDecision, findImageDecision, recordSectionCount, expectedCount, topicOf, exportKb, importKb, kbStats, syncFromCloud, uploadLocalToCloud } from "./ui/learn.js";
-import { cloud, initCloud, signIn, signOut } from "./ui/cloud.js";
+import { cloud, initCloud } from "./ui/cloud.js";
 
 const VERSION = "0.2.0";
 const PDFJS_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs";
@@ -38,11 +38,8 @@ async function init() {
   $("#reviewer").addEventListener("change", (e) => localStorage.setItem("satp:reviewer", e.target.value.trim()));
   setLearnedProfiles(kb.profiles);
   renderKb();
-  initCloud().then(async () => {
-    renderCloudBar();
-    cloud.onAuth(() => { renderCloudBar(); if (cloud.ready) pullCloud(); });
-    if (cloud.ready) pullCloud();
-  });
+  cloud.reviewer = () => $("#reviewer").value.trim();
+  initCloud().then(() => { renderCloudBar(); if (cloud.ready) pullCloud(); });
   pdfjs = await import(PDFJS_URL);
   pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
   setupDrop();
@@ -68,22 +65,9 @@ function renderCloudBar() {
   const box = $("#cloud"); if (!box) return;
   if (!cloud.enabled) { box.hidden = true; return; }
   box.hidden = false;
-  if (cloud.user) {
-    box.replaceChildren(el("span", {}, "☁ ฐานความรู้ทีม: ", el("strong", {}, cloud.user.email)), " ",
-      el("button", { class: "btn small", onclick: () => pullCloud() }, "ซิงก์"), " ",
-      el("button", { class: "btn small", onclick: async () => { await signOut(); renderCloudBar(); } }, "ออกจากระบบ"), " ",
-      el("span", { class: "hint", id: "cloud-status" }));
-    return;
-  }
-  const email = el("input", { type: "email", placeholder: "อีเมล @nokia.com", size: "26" });
-  const status = el("span", { class: "hint" });
-  const btn = el("button", { class: "btn small", onclick: async () => {
-    const v = email.value.trim(); if (!v) return;
-    btn.disabled = true; status.textContent = "กำลังส่ง…";
-    try { await signIn(v); status.textContent = `ส่งลิงก์เข้าใช้ไปที่ ${v} แล้ว — เปิดลิงก์ในอีเมลบนเครื่องนี้`; }
-    catch (e) { status.textContent = "ส่งไม่ได้: " + e.message; btn.disabled = false; }
-  } }, "เข้าใช้ฐานความรู้ทีม");
-  box.replaceChildren(el("span", {}, "☁ ฐานความรู้ทีม (ยังไม่ได้เข้าใช้ — ใช้ข้อมูลในเครื่องนี้เท่านั้น) "), email, " ", btn, " ", status);
+  box.replaceChildren(el("span", {}, "☁ ฐานความรู้ทีม: ", el("strong", {}, cloud.ready ? "เชื่อมต่อแล้ว" : "เชื่อมต่อไม่ได้ — ใช้ข้อมูลในเครื่องนี้")), " ",
+    cloud.ready ? el("button", { class: "btn small", onclick: () => pullCloud() }, "ซิงก์") : null, " ",
+    el("span", { class: "hint", id: "cloud-status" }));
 }
 async function pullCloud() {
   const st = $("#cloud-status"); const say = (t) => { if (st) st.textContent = t; };
@@ -473,7 +457,7 @@ async function renderKb() {
   const clr = el("button", { class: "btn small danger", onclick: async () => { if (!confirm("ล้างฐานความรู้ทั้งหมด (การตัดสินใจ, โปรไฟล์ที่เรียนรู้, รูปอ้างอิง)? แนะนำให้ส่งออกก่อน")) return; kb.decisions = []; kb.profiles = []; kb.imageDecisions = []; localStorage.setItem("satp:kb", JSON.stringify(kb)); await new Promise((res) => { const req = indexedDB.deleteDatabase("satp-kb"); req.onsuccess = req.onerror = req.onblocked = () => res(); }); setLearnedProfiles([]); renderKb(); } }, "ล้างฐานความรู้");
   const imp = el("label", { class: "btn" }, "นำเข้าฐานความรู้", el("input", { type: "file", accept: ".json", hidden: "", onchange: async (e) => { const f = e.target.files[0]; if (!f) return; const m = await importKb(await f.text()); setLearnedProfiles(kb.profiles); alert(`นำเข้าแล้ว ${m.added} รายการ`); renderKb(); } }));
   const up = cloud.ready ? el("button", { class: "btn small", onclick: async (e) => { if (!confirm("ส่งฐานความรู้ในเครื่องนี้ทั้งหมดขึ้นคลาวด์ของทีม? (รายการที่มีอยู่แล้วจะถูกเขียนทับด้วยของเครื่องนี้)")) return; e.target.disabled = true; const n = await uploadLocalToCloud((t) => { e.target.textContent = t; }); e.target.textContent = `อัปโหลดแล้ว ${n} รายการ`; } }, "อัปโหลดฐานความรู้ในเครื่องขึ้นคลาวด์") : null;
-  const note = cloud.ready ? "ฐานความรู้ซิงก์กับคลาวด์ของทีม — ทุกการตัดสินใจและรูปอ้างอิงใหม่ขึ้นคลาวด์ทันที ปุ่มล้างมีผลเฉพาะเครื่องนี้" : cloud.enabled ? "ยังไม่ได้เข้าใช้ฐานความรู้ทีม — ข้อมูลอยู่ในเครื่องนี้ (เข้าใช้ได้ที่แถบด้านบน)" : "ฐานความรู้อยู่ในเบราว์เซอร์เครื่องนี้ — ส่งออกไฟล์ให้ทีมนำเข้าเพื่อใช้ร่วมกัน (ไม่มีข้อมูลเอกสาร มีแต่ลายเซ็นประเด็น, รูปย่อที่ Accept และค่าที่วัด)";
+  const note = cloud.ready ? "ฐานความรู้ซิงก์กับคลาวด์ของทีม — ทุกการตัดสินใจและรูปอ้างอิงใหม่ขึ้นคลาวด์ทันที ปุ่มล้างมีผลเฉพาะเครื่องนี้" : cloud.enabled ? "เชื่อมต่อฐานความรู้ทีมไม่ได้ — ข้อมูลอยู่ในเครื่องนี้ (กดซิงก์ที่แถบด้านบนเมื่อออนไลน์)" : "ฐานความรู้อยู่ในเบราว์เซอร์เครื่องนี้ — ส่งออกไฟล์ให้ทีมนำเข้าเพื่อใช้ร่วมกัน (ไม่มีข้อมูลเอกสาร มีแต่ลายเซ็นประเด็น, รูปย่อที่ Accept และค่าที่วัด)";
   box.replaceChildren(head, el("div", { class: "row" }, exp, imp, up, clr, el("span", { class: "hint" }, note)),
     el("h3", {}, "การตัดสินใจประเด็น (ล่าสุด 30)"), dt, el("h3", {}, "โปรไฟล์ที่เรียนรู้จาก ROM"), pt.children.length > 1 ? pt : el("p", { class: "hint" }, "ยังไม่มี — ไซต์ที่ไม่ตรงโปรไฟล์ P1–P5 จะมีปุ่ม 'ROM ยืนยัน: ใช้ไซต์นี้เป็นอ้างอิง'"));
 }

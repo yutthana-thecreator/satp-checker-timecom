@@ -10,7 +10,8 @@ const listeners = [];
 export const cloud = {
   get enabled() { return !!(SUPABASE_URL && SUPABASE_ANON_KEY); },
   get user() { return user; },
-  get ready() { return !!(sb && user); },
+  get ready() { return !!sb; }, // ไม่ต้อง login — สิทธิ์เปิดให้ anon ตาม supabase/no-login.sql
+  reviewer: () => "",
   onAuth(fn) { listeners.push(fn); },
 };
 
@@ -37,7 +38,7 @@ export async function signIn(email) {
 }
 export async function signOut() { if (sb) await sb.auth.signOut(); }
 
-const stamp = () => ({ updated_by: user?.email || "", updated_at: new Date().toISOString() });
+const stamp = () => ({ updated_by: user?.email || cloud.reviewer() || "", updated_at: new Date().toISOString() });
 const check = ({ data, error }) => { if (error) throw error; return data; };
 const warn = (where) => (e) => { console.warn("cloud " + where + ":", e?.message || e); return null; };
 

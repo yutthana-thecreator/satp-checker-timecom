@@ -60,12 +60,10 @@ node test/serve.mjs .  # เปิด http://localhost:8090 (มี /samples/ �
 - **รูป** → Accept = เก็บรูปย่อเป็นรูปอ้างอิงของ (โปรไฟล์ × section) แสดงเทียบข้างรูปใหม่ (สูงสุด 3 รูป/หัวข้อ) · Reject = จำ hash + เหตุผล ถ้ารูปเดิมโผล่อีกจะเตือน
 - ฐานความรู้อยู่ในเบราว์เซอร์เครื่องนั้น (localStorage + IndexedDB) — ปุ่ม *ส่งออก/นำเข้า JSON* เพื่อแชร์ในทีม ไฟล์นี้ไม่มีเนื้อหาเอกสาร มีแต่ลายเซ็นประเด็น, ค่าที่วัด, รูปย่อที่ Accept
 
-## ฐานความรู้ร่วมของทีม (Supabase) — ไม่บังคับ
-ค่าเริ่มต้นฐานความรู้อยู่ในเบราว์เซอร์แต่ละเครื่อง ถ้าต้องการให้ทั้งทีมใช้ชุดเดียวกัน:
-1. สร้าง project ที่ supabase.com (region Singapore) แล้วรัน `supabase/schema.sql` ใน SQL Editor — สร้างตาราง, Row Level Security, bucket `ref-thumbs`
-2. Authentication → URL Configuration: Site URL = โดเมนเว็บ, เพิ่ม Redirect URLs `https://<โดเมน>/**` และ `http://localhost:8090/**`
-3. ใส่ Project URL และ **anon key** ใน `src/config.js` แล้ว deploy (anon key อยู่ในหน้าเว็บได้ สิทธิ์คุมด้วย RLS)
-4. ผู้ใช้กด "เข้าใช้ฐานความรู้ทีม" ด้วยอีเมล → ได้ลิงก์ทางอีเมล (magic link) → เข้าได้เฉพาะโดเมนใน `allowed_domains` (ค่าเริ่มต้น nokia.com) หรืออีเมลใน `allowed_users`
+## ฐานความรู้ร่วมของทีม (Supabase)
+ฐานความรู้ซิงก์กับ Supabase project `satp-checker-timecom` โดยไม่ต้อง login (ตัดสินใจโดยผู้ใช้ 2026-09-29) — ใครที่รู้ URL เว็บก็อ่าน/เขียนได้ ถ้าต้องการจำกัดให้เปิด Password Protection ของ Vercel
+ตั้งค่าครั้งแรก: รัน `supabase/schema.sql` แล้วตามด้วย `supabase/no-login.sql` ใน SQL Editor · ใส่ Project URL + publishable key ใน `src/config.js`
+(ถ้าภายหลังต้องการบังคับ login: ลบ policy `kb_anon`/`thumbs_anon_*` แล้วเปิดใช้ magic link ตามโค้ดเดิมใน git history)
 
 สิ่งที่ขึ้นคลาวด์: การตัดสินใจประเด็น, ผล Accept/Reject (hash), โปรไฟล์ที่เรียนรู้, รูปย่ออ้างอิง (~30 KB/รูป), สถิติจำนวนรูปต่อหัวข้อ — ไฟล์ PDF และรูปเต็มไม่ออกจากเครื่อง
 ทุกการตัดสินใจใหม่ขึ้นคลาวด์ทันที เปิดหน้าเว็บ/กด "ซิงก์" จะดึงของทีมลงมา ปุ่ม "อัปโหลดฐานความรู้ในเครื่องขึ้นคลาวด์" ใช้ย้ายข้อมูลเดิมครั้งแรก ปุ่มล้างมีผลเฉพาะเครื่องนั้น
