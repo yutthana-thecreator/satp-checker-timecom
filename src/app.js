@@ -2,12 +2,12 @@
 import { analyzeFiles, DEFAULT_CRITERIA } from "./engine/index.js";
 import { MASTERFILE_DATE, SITES } from "./data/sites.js";
 import { buildWorkbook, reviewStats } from "./ui/report.js";
-import { pageImageCanvases, aHash, hamming, blurScore, thumb } from "./ui/images.js";
+import { pageImageCanvases, aHash, hamming, blurScore, thumb, pixelDigest } from "./ui/images.js";
 import { ocrSite } from "./ui/ocr.js";
 import { ocrChecks } from "./engine/ocrRules.js";
 import { summarize } from "./engine/rules.js";
 import { setLearnedProfiles } from "./engine/profiles.js";
-import { kb, applyDecisions, recordDecision, forgetDecision, deleteDecisionRecord, learnProfile, forgetProfile, addRefImage, refImagesFor, refImagesForProfile, refVectorsForProfile, refThumb, backfillEmbeddings, ensureThumbs, removeRefImage, listRefKeys, isReferenceSource, recordImageDecision, findImageDecision, recordSectionCount, expectedCount, topicOf, exportKb, importKb, kbStats, syncFromCloud, uploadLocalToCloud } from "./ui/learn.js";
+import { kb, applyDecisions, recordDecision, forgetDecision, deleteDecisionRecord, learnProfile, forgetProfile, addRefImage, refImagesFor, refImagesForProfile, refVectorsForProfile, refThumb, backfillEmbeddings, setRefDigests, ensureThumbs, removeRefImage, listRefKeys, isReferenceSource, recordImageDecision, findImageDecision, recordSectionCount, expectedCount, topicOf, exportKb, importKb, kbStats, syncFromCloud, uploadLocalToCloud } from "./ui/learn.js";
 import { cloud, initCloud } from "./ui/cloud.js";
 import { embedder, loadEmbedder, embedImage, encodeEmb, decodeEmb, cosine, rank } from "./ui/embed.js";
 
@@ -305,8 +305,8 @@ async function collectSiteImages(r, onProgress = () => {}) {
       const topic = topicFromText(pageText);
       imgs.forEach((im, idx) => {
         const key = `${r.site.key}|${p}|${idx}`;
-        const h = hashCache[key]?.h || (hashCache[key] = { h: aHash(im.canvas), w: im.width, hh: im.height }).h;
-        items.push({ section: label, label, page: p, idx, im, pageText, topic, hash: h, key });
+        const c = hashCache[key] || (hashCache[key] = { h: aHash(im.canvas), d: pixelDigest(im.canvas), w: im.width, hh: im.height });
+        items.push({ section: label, label, page: p, idx, im, pageText, topic, hash: c.h, digest: c.d, key });
       });
       page.cleanup();
     }
@@ -335,7 +335,7 @@ async function harvestSites(list, source, prog) {
       prog.textContent = `เก็บรูปอ้างอิง ${i}/${sites.length} — ${r.facts.code} หน้า ${it.page} (ใหม่ ${added})`;
       const th = thumb(it.im.canvas, 320);
       const emb = canEmbed ? encodeEmb(await embedImage(th)) : "";
-      const rec = await addRefImage({ profile: profileKey, section: it.section, topic: it.topic, site: r.facts.code, page: it.page, thumb: th, hash: it.hash, by, source, emb }, keys);
+      const rec = await addRefImage({ profile: profileKey, section: it.section, topic: it.topic, site: r.facts.code, page: it.page, thumb: th, hash: it.hash, digest: it.digest, by, source, emb }, keys);
       if (rec) added++;
     }
     const seenTopics = new Set();
@@ -381,8 +381,9 @@ async function decideSiteImages(r, status = () => {}) {
   let done = 0;
   for (const it of items) {
     status(`กำลังเทียบรูปกับรูปอ้างอิง ${++done}/${items.length}`);
-    const { im, page: p, idx, hash: h, key } = it;
+    const { im, page: p, idx, hash: h, digest, key } = it;
     const tkey = topicOf(it.section, it.topic);
+    const isPhoto = /^1[.]8|^1[.]6/.test(it.section); // รูปถ่าย (ไม่ใช่ screenshot) — ใช้ aHash ใกล้เคียงเป็นสัญญาณเสริมได้
     if (!seenTopic.has(tkey)) {
       seenTopic.add(tkey);
       const n = items.filter((x) => topicOf(x.section, x.topic) === tkey).length;
@@ -393,9 +394,17 @@ async function decideSiteImages(r, status = () => {}) {
     if (!item) { item = { section: it.label, page: p, idx, verdict: "", reason: "", by: "", at: "", hash: h }; rv.items.push(item); }
     item.hash = h; item.topic = it.topic; item.label = it.topic || it.label;
     const flags = [];
-    for (const [k2, v2] of Object.entries(hashCache)) if (k2 !== key && v2.w === im.width && v2.hh === im.height && k2.split("|").slice(0, 2).join("|") !== `${r.site.key}|${p}` && hamming(h, v2.h) <= 4) flags.push(`เหมือนรูป ${k2.split("|")[0]} หน้า ${k2.split("|")[1]}`);
-    const reused = allRefs.find((x) => isReferenceSource(x.source) && hamming(h, x.hash) <= 4);
-    if (reused) flags.push(`เหมือนรูปของไซต์ตัวอย่าง ${reused.site} (หน้า ${reused.page}) — รูปถูกนำมาใช้ซ้ำ?`);
+    // รูปซ้ำในชุดที่โหลด: ลายนิ้วมือพิกเซลตรงกัน (ไฟล์เดียวกัน) · รูปถ่ายที่ aHash ต่าง ≤ 2 บิต = น่าจะรูปเดียวกันแต่บันทึกใหม่
+    const dupSeen = new Set();
+    for (const [k2, v2] of Object.entries(hashCache)) {
+      if (k2 === key || k2.split("|").slice(0, 2).join("|") === `${r.site.key}|${p}`) continue;
+      const exact = v2.d === digest, near = isPhoto && v2.w === im.width && v2.hh === im.height && hamming(h, v2.h) <= 2;
+      if (!exact && !near) continue;
+      const where = `${k2.split("|")[0]} หน้า ${k2.split("|")[1]}`; if (dupSeen.has(where)) continue; dupSeen.add(where);
+      flags.push(exact ? `รูปเดียวกับ ${where}` : `น่าจะรูปเดียวกับ ${where}`);
+    }
+    const reused = allRefs.find((x) => isReferenceSource(x.source) && (x.digest ? x.digest === digest : isPhoto && hamming(h, x.hash) <= 2));
+    if (reused) flags.push(`${reused.digest ? "รูปเดียวกับ" : "น่าจะรูปเดียวกับ"}ไซต์ตัวอย่าง ${reused.site} (หน้า ${reused.page}) — รูปถูกนำมาใช้ซ้ำ`);
     const blur = blurScore(im.canvas);
     if (blur < 15) flags.push(`ภาพอาจเบลอ (คมชัด ${blur.toFixed(0)})`);
     const prev = findImageDecision(h);
@@ -614,6 +623,15 @@ if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
     },
     runCheck, harvestAllAsSamples: () => harvestSites(run.results, "sample", $("#progress")), get result() { return run; },
     decideSiteImages, reviews,
+    backfillDigests: async () => { // เติมลายนิ้วมือพิกเซลให้รูปอ้างอิงของไซต์ที่โหลดอยู่ (ใช้ครั้งเดียวกับชุดตัวอย่าง)
+      const prog = $("#progress"); let n = 0, i = 0;
+      for (const r of run.results) {
+        i++; const profileKey = r.facts.profile || "L:" + r.facts.nearestProfile;
+        const { items } = await collectSiteImages(r, (t) => { prog.textContent = `digest ${i}/${run.results.length} ${t}`; });
+        n += await setRefDigests(profileKey, items.map((it) => ({ hash: it.hash, digest: it.digest })));
+      }
+      prog.textContent = `เติม digest แล้ว ${n} รูป`; return n;
+    },
     backfillEmbeddings: (profile) => backfillEmbeddings(embedImage, encodeEmb, (t) => { $("#progress").textContent = t; }, profile), loadEmbedder: () => loadEmbedder((t) => { $("#progress").textContent = t; }), refVectorsForProfile, decodeEmb, cosine, embedImage, files: () => files, reviews, ocrCache, wb: () => buildWorkbook(run.results, reviews, { when: run.when, reviewer: "", version: VERSION }),
   };
 }

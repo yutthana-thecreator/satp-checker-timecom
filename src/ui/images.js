@@ -83,6 +83,14 @@ export async function pageImageCanvases(page) {
   return out;
 }
 
+// ลายนิ้วมือพิกเซลทั้งรูป (FNV-1a 32 บิต 2 ชุด) — รูปที่ copy มาใช้ซ้ำจะตรงกันทุกไบต์ ต่างจาก aHash ที่ screenshot ต่างค่าแต่ template เดียวกันจะเหมือนกัน
+export function pixelDigest(canvas) {
+  const d = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+  let h1 = 0x811c9dc5, h2 = 0x01000193;
+  for (let i = 0; i < d.length; i += 4) { h1 = Math.imul(h1 ^ d[i] ^ (d[i + 1] << 8) ^ (d[i + 2] << 16), 16777619) >>> 0; h2 = Math.imul(h2 ^ d[i + 2] ^ (d[i] << 8) ^ (d[i + 1] << 16), 2246822519) >>> 0; }
+  return `${canvas.width}x${canvas.height}:${h1.toString(16)}${h2.toString(16)}`;
+}
+
 export function thumb(canvas, maxW = 520) {
   const s = Math.min(1, maxW / canvas.width);
   const c = document.createElement("canvas");

@@ -126,7 +126,7 @@ export const topicOf = (section, topic) => (topic ? `${section} ${topic}` : sect
 export const listRefKeys = () => tx("readonly", (s) => s.getAllKeys()).then((r) => r || []);
 const sameImage = (keys, profile, hash) => keys.some((k) => k.startsWith(profile + "|") && k.endsWith("|" + hash));
 export const isReferenceSource = (src) => src === "signed" || src === "sample";
-export async function addRefImage({ profile, section, topic, site, page, thumb, hash, by, source = "rom", emb = "" }, keys = null) {
+export async function addRefImage({ profile, section, topic, site, page, thumb, hash, digest = "", by, source = "rom", emb = "" }, keys = null) {
   keys = keys || (await listRefKeys());
   const key = topicOf(section, topic);
   if (sameImage(keys, profile, hash)) return null;
@@ -134,7 +134,7 @@ export async function addRefImage({ profile, section, topic, site, page, thumb, 
     const same = (await listRefImages()).filter((x) => x.profile === profile && topicOf(x.section, x.topic) === key && (x.source || "rom") === "rom").sort((a, b) => (a.ts || 0) - (b.ts || 0));
     if (same.length >= MAX_ROM_REF) await tx("readwrite", (s) => s.delete(same[0].id));
   }
-  const rec = { id: `${profile}|${key}|${hash}`, profile, section, topic: topic || "", site, page, thumb, hash, by, source, emb, at: new Date().toLocaleString("th-TH"), ts: Date.now() };
+  const rec = { id: `${profile}|${key}|${hash}`, profile, section, topic: topic || "", site, page, thumb, hash, digest, by, source, emb, at: new Date().toLocaleString("th-TH"), ts: Date.now() };
   await tx("readwrite", (s) => s.put(rec));
   keys.push(rec.id);
   if (metaCache) metaCache.push({ id: rec.id, profile, site, source });
@@ -148,12 +148,21 @@ export async function refImagesForProfile(profile) { return tx("readonly", (s) =
 // ข้อมูลย่อของรูปอ้างอิง (ไม่รวมรูปย่อ) สำหรับสถิติ — cache ในหน่วยความจำ ล้างเมื่อมีการเพิ่ม/ลบ/ซิงก์
 let metaCache = null;
 export const invalidateRefMeta = () => { metaCache = null; };
-async function refMeta() { if (!metaCache) metaCache = (await listRefImages()).map((x) => ({ id: x.id, profile: x.profile, site: x.site, source: x.source, emb: !!x.emb })); return metaCache; }
+async function refMeta() { if (!metaCache) metaCache = (await listRefImages()).map((x) => ({ id: x.id, profile: x.profile, site: x.site, source: x.source, emb: !!x.emb, digest: !!x.digest })); return metaCache; }
 
 // ---------- ลายเซ็นภาพของรูปอ้างอิง (ไม่ต้องมีรูปย่อ) ----------
 // → [{id, profile, section, topic, site, page, hash, source, vec}] เฉพาะที่มี emb
 export async function refVectorsForProfile(profile) {
-  return (await refImagesForProfile(profile)).filter((x) => x.emb).map((x) => ({ id: x.id, profile: x.profile, section: x.section, topic: x.topic, site: x.site, page: x.page, hash: x.hash, source: x.source, thumb_path: x.thumb_path, vec: decodeEmb(x.emb) }));
+  return (await refImagesForProfile(profile)).filter((x) => x.emb).map((x) => ({ id: x.id, profile: x.profile, section: x.section, topic: x.topic, site: x.site, page: x.page, hash: x.hash, digest: x.digest || "", source: x.source, thumb_path: x.thumb_path, vec: decodeEmb(x.emb) }));
+}
+// เติมลายนิ้วมือพิกเซลให้รูปอ้างอิงที่ hash ตรงกัน (โปรไฟล์เดียวกัน) แล้วส่งขึ้นคลาวด์เป็นชุด
+export async function setRefDigests(profile, pairs) {
+  const refs = await refImagesForProfile(profile);
+  const byHash = new Map(refs.map((x) => [x.hash, x]));
+  const rows = [];
+  for (const { hash, digest } of pairs) { const rec = byHash.get(hash); if (!rec || rec.digest === digest) continue; rec.digest = digest; await tx("readwrite", (s) => s.put(rec)); const { thumb, ...meta } = rec; rows.push({ key: rec.id, data: meta }); }
+  for (let i = 0; i < rows.length; i += 40) await pushRows("ref_images", rows.slice(i, i + 40));
+  return rows.length;
 }
 export async function refThumb(id) {
   const rec = await tx("readonly", (s) => s.get(id));
@@ -261,8 +270,8 @@ export async function syncFromCloud(onProgress = () => {}) {
   }
   // รูปที่มีในเครื่องแล้วแต่คลาวด์มีลายเซ็นภาพ (emb) ใหม่กว่า → อัปเดต
   const localMeta = new Map((await refMeta()).map((x) => [x.id, x]));
-  const upd = c.ref_images.filter((r) => localKeys.has(r.key) && r.emb && !localMeta.get(r.key)?.emb);
-  if (upd.length) { await tx("readwrite", (s) => { for (const r of upd) { const req = s.get(r.key); req.onsuccess = () => { if (req.result) s.put({ ...req.result, emb: r.emb, thumb_path: r.thumb_path || req.result.thumb_path }); }; } return null; }); metaCache = null; }
+  const upd = c.ref_images.filter((r) => localKeys.has(r.key) && ((r.emb && !localMeta.get(r.key)?.emb) || (r.digest && !localMeta.get(r.key)?.digest)));
+  if (upd.length) { await tx("readwrite", (s) => { for (const r of upd) { const req = s.get(r.key); req.onsuccess = () => { if (req.result) s.put({ ...req.result, emb: r.emb || req.result.emb, digest: r.digest || req.result.digest || "", thumb_path: r.thumb_path || req.result.thumb_path }); }; } return null; }); metaCache = null; }
   // รูปที่ถูกลบจากคลาวด์ (ROM ถอดออกจากเครื่องอื่น) → ลบในเครื่องด้วย
   const cloudKeys = new Set(c.ref_images.map((r) => r.key));
   const gone = [...localKeys].filter((k) => !cloudKeys.has(k));
