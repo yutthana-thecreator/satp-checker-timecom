@@ -116,3 +116,76 @@ export async function imageBBox(page) {
   }
   return best;
 }
+
+// ---------- OCR ป้ายในรูปถ่าย ----------
+// ป้ายของโปรเจกต์เป็นเทปสีเหลืองตัวอักษรดำ (NIIMBOT/Brother) → หาบริเวณสีเหลืองในรูป ตัดออกมาขยายแล้ว OCR ทีละป้าย
+// แม่นกว่า OCR ทั้งรูปมาก (ตัวอักษรบนป้ายเล็กและมีข้อความอื่นรบกวน) · ถ้าไม่พบบริเวณสีเหลืองจะ OCR ทั้งรูปแบบ sparse text
+export function findYellowBoxes(canvas) {
+  const W = 320, s = W / canvas.width, H = Math.max(1, Math.round(canvas.height * s));
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const ctx = c.getContext("2d"); ctx.drawImage(canvas, 0, 0, W, H);
+  const d = ctx.getImageData(0, 0, W, H).data;
+  const mask = new Uint8Array(W * H);
+  for (let i = 0, p = 0; i < d.length; i += 4, p++) { const r = d[i], g = d[i + 1], b = d[i + 2]; if (r > 140 && g > 120 && b < 120 && r - b > 70 && g - b > 50 && Math.abs(r - g) < 90) mask[p] = 1; }
+  // flood fill หา component
+  const seen = new Uint8Array(W * H); const boxes = [];
+  const stack = [];
+  for (let p0 = 0; p0 < W * H; p0++) {
+    if (!mask[p0] || seen[p0]) continue;
+    let minx = W, miny = H, maxx = 0, maxy = 0, n = 0; stack.push(p0); seen[p0] = 1;
+    while (stack.length) {
+      const p = stack.pop(); const x = p % W, y = (p / W) | 0; n++;
+      if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y;
+      for (const q of [p - 1, p + 1, p - W, p + W]) { if (q < 0 || q >= W * H) continue; if (Math.abs((q % W) - x) > 1) continue; if (mask[q] && !seen[q]) { seen[q] = 1; stack.push(q); } }
+    }
+    const bw = maxx - minx + 1, bh = maxy - miny + 1;
+    if (n >= 40 && bw >= 12 && bh >= 5 && n / (bw * bh) > 0.35) boxes.push({ x: minx / s, y: miny / s, w: bw / s, h: bh / s, n });
+  }
+  // รวมกล่องที่ซ้อน/ติดกัน
+  boxes.sort((a, b) => b.n - a.n);
+  const out = [];
+  for (const b of boxes) {
+    const hit = out.find((o) => !(b.x > o.x + o.w + 8 / s || b.x + b.w < o.x - 8 / s || b.y > o.y + o.h + 8 / s || b.y + b.h < o.y - 8 / s));
+    if (hit) { const x0 = Math.min(hit.x, b.x), y0 = Math.min(hit.y, b.y); hit.w = Math.max(hit.x + hit.w, b.x + b.w) - x0; hit.h = Math.max(hit.y + hit.h, b.y + b.h) - y0; hit.x = x0; hit.y = y0; }
+    else out.push({ ...b });
+  }
+  return out.slice(0, 8);
+}
+
+function cropScale(canvas, box, pad = 0.15) {
+  const px = box.w * pad, py = box.h * pad;
+  const x = Math.max(0, box.x - px), y = Math.max(0, box.y - py);
+  const w = Math.min(canvas.width - x, box.w + 2 * px), h = Math.min(canvas.height - y, box.h + 2 * py);
+  const scale = Math.min(4, Math.max(1, 900 / w));
+  const c = document.createElement("canvas"); c.width = Math.round(w * scale); c.height = Math.round(h * scale);
+  const ctx = c.getContext("2d"); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(canvas, x, y, w, h, 0, 0, c.width, c.height);
+  // เพิ่ม contrast: เทา + ยืดช่วง
+  const id = ctx.getImageData(0, 0, c.width, c.height), d = id.data;
+  let lo = 255, hi = 0; for (let i = 0; i < d.length; i += 4) { const v = (d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11) | 0; d[i] = v; if (v < lo) lo = v; if (v > hi) hi = v; }
+  const rng = Math.max(1, hi - lo);
+  for (let i = 0; i < d.length; i += 4) { const v = Math.max(0, Math.min(255, ((d[i] - lo) * 255) / rng)); d[i] = d[i + 1] = d[i + 2] = v; }
+  ctx.putImageData(id, 0, 0);
+  return c;
+}
+
+export async function ocrLabels(canvas, onStatus) {
+  const w = await getWorker(onStatus);
+  const boxes = findYellowBoxes(canvas);
+  const texts = []; let confSum = 0, confN = 0;
+  if (boxes.length) {
+    await w.setParameters({ tessedit_pageseg_mode: "6" });
+    for (const b of boxes) {
+      const { data } = await w.recognize(cropScale(canvas, b));
+      const t = (data.text || "").trim();
+      if (t) { texts.push(t); confSum += data.confidence || 0; confN++; }
+    }
+  }
+  if (!texts.length) {
+    await w.setParameters({ tessedit_pageseg_mode: "11" });
+    const { data } = await w.recognize(prep(canvas));
+    texts.push((data.text || "").trim()); confSum += data.confidence || 0; confN++;
+  }
+  await w.setParameters({ tessedit_pageseg_mode: "3" });
+  return { text: texts.join("\n"), confidence: confN ? confSum / confN : 0, boxes: boxes.length };
+}

@@ -3,7 +3,8 @@ import { analyzeFiles, DEFAULT_CRITERIA } from "./engine/index.js";
 import { MASTERFILE_DATE, SITES } from "./data/sites.js";
 import { buildWorkbook, reviewStats } from "./ui/report.js";
 import { pageImageCanvases, aHash, hamming, blurScore, thumb, pixelDigest, renderPage } from "./ui/images.js";
-import { ocrSite } from "./ui/ocr.js";
+import { ocrSite, ocrLabels } from "./ui/ocr.js";
+import { labelExpectations, checkLabelText, labelTopicOf } from "./engine/labels.js";
 import { ocrChecks } from "./engine/ocrRules.js";
 import { summarize } from "./engine/rules.js";
 import { setLearnedProfiles } from "./engine/profiles.js";
@@ -434,6 +435,7 @@ async function decideSiteImages(r, status = () => {}) {
   const FLOOR = criteria.imageSim?.value ?? 0.7, MARGIN = criteria.imageSim?.margin ?? 0.03;
   const pct = (x) => `${Math.round(x * 100)}%`;
   const TH = topicThresholds(profileKey, allRefs, FLOOR);
+  const labelExp = labelExpectations(r);
   const thOf = (tkey) => TH[tkey] ?? Math.max(FLOOR, 0.78);
 
   // ---------- ตัดสินแต่ละรูป ----------
@@ -470,6 +472,19 @@ async function decideSiteImages(r, status = () => {}) {
     if (blur < 15) flags.push(`ภาพอาจเบลอ (คมชัด ${blur.toFixed(0)})`);
     const prev = findImageDecision(h);
     if (prev && prev.verdict === "reject") flags.push(`รูปนี้เคยถูก Reject ที่ ${prev.site}: ${prev.reason} (${prev.by || ""})`);
+    // อ่านป้ายด้วย OCR (เฉพาะหัวข้อรูปถ่ายที่มีป้าย) เทียบรหัสไซต์/IP/ไซต์ปลายทางตามรูปแบบป้ายของโปรเจกต์
+    const labelNotes = [];
+    const ltopic = labelTopicOf(it.section, it.topic);
+    if (ltopic) {
+      try {
+        if (!item.ocr || item.ocr.hash !== h) { status(`อ่านป้ายในรูป ${done}/${items.length} (OCR)`); const o = await ocrLabels(im.canvas, status); item.ocr = { hash: h, text: o.text.slice(0, 400), conf: Math.round(o.confidence), boxes: o.boxes }; }
+        const res = checkLabelText(ltopic, item.ocr.text, labelExp, item.ocr.boxes > 0);
+        flags.push(...res.flags); labelNotes.push(...res.notes);
+        item.label_ok = res.found.code; item.label_ip = res.found.ip;
+        // ป้ายยืนยันรหัสไซต์ (และ IP ตรง ถ้ามี) ในรูป rack/NE ID = หลักฐานตรงกว่าความคล้ายภาพ
+        item.label_confirms = res.found.code && !res.flags.length && /\(a\)|\(b\)/.test(ltopic);
+      } catch (e) { console.warn("label ocr", e); labelNotes.push("OCR ป้ายไม่ทำงาน: " + (e.message || e)); }
+    }
     // เทียบกับรูปอ้างอิง
     let similar = [], verdictNote = "", auto = false;
     if (canEmbed) {
@@ -488,11 +503,12 @@ async function decideSiteImages(r, status = () => {}) {
         if (!same.length) verdictNote = "ยังไม่มีรูปอ้างอิงของหัวข้อนี้ในโปรไฟล์นี้";
         else if (flags.length) verdictNote = `คล้ายรูปอ้างอิง ${pct(s1)} แต่มีข้อสังเกต`;
         else if (s1 >= th && s1 + MARGIN >= so) { auto = true; verdictNote = `ผ่านอัตโนมัติ: คล้ายรูปอ้างอิงของ ${same[0].ref.site} ${pct(s1)} (เกณฑ์หัวข้อนี้ ${pct(th)})${sibNote}`; }
+        else if (item.label_confirms) { auto = true; verdictNote = `ผ่านอัตโนมัติ: ป้ายในรูปยืนยันรหัสไซต์${item.label_ip ? " และ IP" : ""} (คล้ายรูปอ้างอิง ${pct(s1)})`; }
         else if (so >= th && so > s1 + MARGIN) verdictNote = `น่าจะเป็นรูปของ "${otherSec[0].ref.topic || otherSec[0].ref.section}" (${pct(so)}) ไม่ใช่ "${it.topic || it.label}" (${pct(s1)})`;
         else verdictNote = `คล้ายรูปอ้างอิงเพียง ${pct(s1)} (เกณฑ์หัวข้อนี้ ${pct(th)})${sibNote}`;
       } catch (e) { console.warn("embed", e); verdictNote = "เทียบรูปไม่ได้: " + (e.message || e); }
     } else verdictNote = allRefs.length ? "โมเดลเปรียบเทียบรูปโหลดไม่ได้ — ตรวจเอง" : "ยังไม่มีรูปอ้างอิงของโปรไฟล์นี้";
-    item.auto = [verdictNote, ...flags].join("; ");
+    item.auto = [verdictNote, ...flags, ...labelNotes.map((n) => "ป้าย: " + n)].join("; ");
     if (auto && !item.verdict) { item.verdict = "accept"; item.by = "ระบบ"; item.at = new Date().toLocaleString("th-TH"); item.autoAccepted = true; }
     else if (!auto && item.autoAccepted && item.by === "ระบบ") { item.verdict = ""; item.by = ""; item.at = ""; item.autoAccepted = false; } // เกณฑ์เปลี่ยน → ยกเลิกผลอัตโนมัติเดิม
     const entry = { it, item, similar };
