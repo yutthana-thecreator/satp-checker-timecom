@@ -16,9 +16,10 @@ async function getWorker(onStatus) {
   return workerPromise;
 }
 
-// ขยายรูปเล็กให้ตัวอักษรสูงพอ (Tesseract อ่านดีที่ ≥ ~20px ต่อบรรทัด)
+// ขยายรูปให้ตัวอักษรสูงพอ (Tesseract อ่านดีที่ ≥ ~20px ต่อบรรทัด) — screenshot จอเต็ม 1380 px ตัวอักษรในตารางสูง ~8 px ต้องขยาย 2 เท่า
+// ทดสอบกับ Inventory ของ AHTMJ: ไม่ขยาย → conf 47 อ่าน OTDR/8EC2 ไม่ได้ · ขยาย 2 เท่า → conf 78 อ่านครบ (~5 วินาที/รูป)
 function prep(canvas) {
-  const scale = canvas.width < 1400 ? Math.min(3, 1400 / canvas.width) : 1;
+  const scale = Math.min(3, Math.max(1, 2800 / canvas.width));
   if (scale === 1) return canvas;
   const c = document.createElement("canvas");
   c.width = Math.round(canvas.width * scale); c.height = Math.round(canvas.height * scale);
