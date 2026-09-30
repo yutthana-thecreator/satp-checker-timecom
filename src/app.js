@@ -433,7 +433,8 @@ async function reviewPanel(r, status = () => {}) {
   saveReview(r);
 
   // ---------- แสดงผล ----------
-  const grid = (list) => { const g = el("div", { class: "review-grid" }); for (const e of list) g.append(reviewCard(r, e.item, e.it.im, e.it.pageText, e.similar)); return g; };
+  // รูปอ้างอิงที่คล้ายที่สุด (ดาวน์โหลดรูปย่อตามต้องการ) แสดงเฉพาะรูปที่ต้องให้ ROM ตรวจ
+  const grid = (list, withRefs) => { const g = el("div", { class: "review-grid" }); for (const e of list) g.append(reviewCard(r, e.item, e.it.im, e.it.pageText, withRefs ? e.similar : null)); return g; };
   const summary = el("div", { class: "row" },
     el("span", { class: "pill warn" }, `ต้องให้ ROM ตรวจ ${need.length}`), " ",
     el("span", { class: "pill ok" }, `ผ่านอัตโนมัติ ${autoOk.length}`), " ",
@@ -445,8 +446,8 @@ async function reviewPanel(r, status = () => {}) {
   if (!items.length) wrap.append(el("p", {}, "ไม่พบรูปใน Attachment"));
   const section = (title, list, open) => {
     if (!list.length) return;
-    const g = grid(list); g.hidden = !open;
-    const btn = el("button", { class: "btn small", onclick: () => { g.hidden = !g.hidden; btn.textContent = (g.hidden ? "แสดง" : "ซ่อน") + ` (${list.length})`; } }, (open ? "ซ่อน" : "แสดง") + ` (${list.length})`);
+    const g = grid(list, open); g.style.display = open ? "" : "none";
+    const btn = el("button", { class: "btn small", onclick: () => { const hidden = g.style.display === "none"; g.style.display = hidden ? "" : "none"; btn.textContent = (hidden ? "ซ่อน" : "แสดง") + ` (${list.length})`; } }, (open ? "ซ่อน" : "แสดง") + ` (${list.length})`);
     wrap.append(el("h3", {}, title, " ", btn), g);
   };
   section("ต้องให้ ROM ตรวจ", need, true);
