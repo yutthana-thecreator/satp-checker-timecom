@@ -187,18 +187,34 @@ async function runCheck() {
 }
 
 function pill(status) {
-  const cls = /^ผ่าน(?! \(ยังไม่ตรวจรูป)/.test(status) ? "ok" : status.startsWith("ไม่ผ่าน") ? "fail" : "warn";
+  const cls = /^ผ่าน(?! \(ยังไม่ตรวจ)/.test(status) ? "ok" : status.startsWith("ไม่ผ่าน") ? "fail" : "warn";
   return el("span", { class: "pill " + cls }, status);
 }
 
 // สถานะรวม = ข้อความ (กฎ R01–R26) + รูป (ตัดสินอัตโนมัติ/ROM) — ผ่านต่อเมื่อทั้งสองส่วนผ่าน
+// สรุปแยก 3 ส่วนสำหรับป้ายแท็บและบรรทัดสถานะ
+function partSummary(r) {
+  const real = r.issues.filter((i) => i.severity !== "info");
+  const textIssues = real.filter((i) => !i.ocr), ocrIssues = real.filter((i) => i.ocr);
+  const rv = reviews[r.site.key], st = reviewStats(rv);
+  const auto = (rv?.items || []).filter((x) => x.autoAccepted).length;
+  return {
+    text: textIssues.some((i) => i.severity === "fail") ? `ไม่ผ่าน ${textIssues.filter((i) => i.severity === "fail").length}` : textIssues.length ? `เตือน ${textIssues.length}` : "ผ่าน",
+    textN: textIssues.length,
+    ocr: r.ocrError ? "ผิดพลาด" : !r.ocrDone ? "ยังไม่ตรวจ" : ocrIssues.length ? `ข้อสังเกต ${ocrIssues.length}` : "ผ่าน",
+    ocrN: r.ocrDone ? ocrIssues.length : null,
+    photo: !rv?.reviewed ? "ยังไม่ตรวจ" : st.reject ? `Reject ${st.reject}` : st.pending ? `รอ ROM ${st.pending}` : `ผ่าน (อัตโนมัติ ${auto}${st.accept - auto ? ", ROM " + (st.accept - auto) : ""})`,
+    st,
+  };
+}
 function combineStatus(r) {
   const s = r.summary;
   if (s.textStatus == null) s.textStatus = s.status;
   const t = s.textStatus;
   if (r.facts.customerAccepted || !r.site.att) { s.status = t; return t; }
   const rv = reviews[r.site.key];
-  if (!rv?.reviewed) s.status = t === "ไม่ผ่าน" ? t : t + " (ยังไม่ตรวจรูป)";
+  if (!r.ocrDone) s.status = t === "ไม่ผ่าน" ? t : t + " (ยังไม่ตรวจ OCR/รูป)";
+  else if (!rv?.reviewed) s.status = t === "ไม่ผ่าน" ? t : t + " (ยังไม่ตรวจรูป)";
   else {
     const st = reviewStats(rv);
     s.status = t === "ไม่ผ่าน" ? (st.reject || st.pending ? `ไม่ผ่าน (รูป ${st.reject ? "Reject " + st.reject : ""}${st.pending ? " รอ ROM " + st.pending : ""})`.replace(/\s+\)/, ")") : t)
@@ -226,6 +242,28 @@ function renderResults() {
 }
 const cssId = (s) => s.replace(/[^a-zA-Z0-9]/g, "_");
 
+function tabLabel(r, which) {
+  const p = partSummary(r);
+  if (which === "issues") return `ประเด็น (${p.textN + (p.ocrN || 0)})`;
+  if (which === "review") return `ตรวจรูป: ${p.photo}`;
+  return `OCR screenshot: ${p.ocr}`;
+}
+// อัปเดตหัวข้อ/ป้ายแท็บ/บรรทัดสถานะของไซต์ที่กำลังแสดง เมื่อผล OCR หรือรูปในพื้นหลังเปลี่ยน
+function refreshDetailHeader(r) {
+  const box = $("#details"); if (!box || box.dataset.site !== r.site.key) return;
+  const h3 = box.querySelector("h3"); if (h3) h3.replaceChildren(`${r.facts.code} — ${r.site.folder}`, " ", pill(r.summary.status));
+  for (const b of box.querySelectorAll(".tabs button[data-tab]")) b.textContent = tabLabel(r, b.dataset.tab);
+  const line = box.querySelector("#pass-line"); if (line) line.replaceWith(passLine(r));
+  // แท็บประเด็นเปิดอยู่ → วาดตารางใหม่ให้เห็นประเด็น OCR ที่เพิ่งเพิ่ม (แท็บอื่นไม่รบกวน)
+  const active = box.querySelector(".tabs button.active");
+  if (active?.dataset.tab === "issues") { const body = box.querySelector(".detail > div:last-child"); if (body && !body.querySelector(".page-canvas")) body.replaceChildren(issuesTable(r)); }
+}
+function passLine(r) {
+  const p = partSummary(r);
+  return el("p", { id: "pass-line" }, pill(r.summary.status), " ",
+    el("span", { class: "hint" }, r.facts.customerAccepted ? "ลูกค้าตรวจรับแล้ว — ไม่ต้องตรวจก่อน submit" : `ข้อความ: ${p.text} · OCR screenshot: ${p.ocr} · รูป: ${p.photo}`),
+    !r.facts.customerAccepted && /^ผ่าน/.test(r.summary.status) && !/ยังไม่/.test(r.summary.status) ? el("span", {}, " — ส่งลูกค้าได้") : null);
+}
 function showDetail(r, showInfo = false) {
   const box = $("#details");
   const facts = r.facts;
@@ -243,17 +281,19 @@ function showDetail(r, showInfo = false) {
   } }, "ROM ยืนยัน: ใช้ไซต์นี้เป็นอ้างอิง"));
   const tabs = el("div", { class: "tabs" });
   const body = el("div", {});
-  const tabIssues = el("button", { class: "active", onclick: () => { activate(tabIssues); body.replaceChildren(issuesTable(r)); } }, `ประเด็น (${r.issues.filter((i) => i.severity !== "info").length})`);
+  const tabIssues = el("button", { class: "active", "data-tab": "issues", onclick: () => { activate(tabIssues); body.replaceChildren(issuesTable(r)); } }, tabLabel(r, "issues"));
   const tabReview = el("button", { onclick: async () => {
     activate(tabReview);
     const st = el("p", { class: "hint" }, "กำลังดึงรูปจาก Attachment…"); body.replaceChildren(st);
     body.replaceChildren(await reviewPanel(r, (t) => { st.textContent = t; }));
-  } }, "ตรวจรูป (Accept/Reject)");
-  const tabOcr = el("button", { onclick: () => { activate(tabOcr); const wrap = el("div", {}); body.replaceChildren(wrap); ocrPanel(r, wrap); } }, "OCR screenshot");
+  } }, tabLabel(r, "review"));
+  tabReview.dataset.tab = "review";
+  const tabOcr = el("button", { "data-tab": "ocr", onclick: () => { activate(tabOcr); const wrap = el("div", {}); body.replaceChildren(wrap); ocrPanel(r, wrap); } }, tabLabel(r, "ocr"));
   const activate = (b) => { for (const x of tabs.children) x.classList.toggle("active", x === b); };
   if (r.facts.customerAccepted) tabs.append(tabIssues, el("span", { class: "hint" }, "ลูกค้าตรวจรับแล้ว — ไม่ต้องตรวจรูป / OCR"));
   else tabs.append(tabIssues, tabReview, tabOcr);
-  box.replaceChildren(el("div", { class: "detail" }, el("h3", {}, `${facts.code} — ${r.site.folder}`, " ", pill(r.summary.status)), head, tabs, body));
+  box.dataset.site = r.site.key;
+  box.replaceChildren(el("div", { class: "detail" }, el("h3", {}, `${facts.code} — ${r.site.folder}`, " ", pill(combineStatus(r))), head, tabs, body));
   body.append(issuesTable(r, showInfo));
   if (!showInfo) box.scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -264,7 +304,8 @@ function issuesTable(r, showInfo = false) {
   const real = r.issues.filter((i) => i.severity !== "info");
   const infos = r.issues.filter((i) => i.severity === "info");
   // ผ่าน = ไม่แสดงอะไร นอกจากข้อความผ่าน; ข้อมูลอ้างอิง (โปรไฟล์, หมายเหตุ) ดูได้เมื่อกดขยาย
-  if (!real.length) wrap.append(el("p", {}, el("span", { class: "pill ok" }, r.summary.status), " ", r.facts.customerAccepted ? "ลูกค้าตรวจรับแล้ว — ไม่ต้องตรวจก่อน submit" : "ไม่พบข้อผิดหรือข้อสังเกต — ส่งลูกค้าได้"));
+  combineStatus(r);
+  wrap.append(passLine(r));
   if (infos.length) wrap.append(el("button", { class: "btn small", onclick: () => wrap.replaceWith(issuesTable(r, !showInfo)) }, showInfo ? "ซ่อนข้อมูลอ้างอิง" : `แสดงข้อมูลอ้างอิง (${infos.length})`));
   const rows = showInfo ? r.issues : real;
   if (!rows.length) return wrap;
@@ -367,11 +408,13 @@ async function reviewAllInBackground(results, prog) {
   for (const r of todo) {
     i++;
     const c = $("#rv-" + cssId(r.site.key)); if (c) c.textContent = "กำลังตรวจ…";
+    try { await runOcrSite(r, (t) => { prog.textContent = `OCR ${i}/${todo.length} ${r.facts.code}: ${t}`; }); }
+    catch (e) { console.warn("ocr", r.facts.code, e); r.ocrDone = true; r.ocrError = e.message || String(e); }
     try { await reviewSite(r, (t) => { prog.textContent = `ตรวจรูป ${i}/${todo.length} ${r.facts.code}: ${t}`; }); }
     catch (e) { console.warn("review", r.facts.code, e); }
     renderSummaryRow(r);
   }
-  prog.textContent = `เสร็จ ${results.length} ไซต์ · ตรวจรูปแล้ว ${todo.length} ไซต์`;
+  prog.textContent = `เสร็จ ${results.length} ไซต์ · OCR และตรวจรูปแล้ว ${todo.length} ไซต์`;
 }
 
 const hashCache = {}; // `${site}|${page}|${idx}` -> hash
@@ -654,21 +697,34 @@ function reviewCard(r, item, im, pageText, similar = null) {
 
 // ---------- 10. OCR screenshot ----------
 const ocrCache = {}; // siteKey -> raw
-async function ocrPanel(r, wrap) {
-  const status = el("p", { class: "hint ocr-status" }, "กำลังเตรียม OCR…");
-  wrap.append(status);
-  const att = files.find((x) => x.name === r.site.attFile);
-  const satp = files.find((x) => x.name === r.site.satpFile);
-  if (!att && !satp) { status.textContent = "ไม่พบไฟล์ของไซต์นี้ในรายการที่โหลด"; return wrap; }
-  try {
+// OCR screenshot (กฎ O01–O06) ของไซต์ — ทำครั้งเดียว ผลเข้าประเด็น/สถานะ/Excel · ใช้ทั้งงานพื้นหลังและแท็บ OCR
+const ocrJobs = {}; // siteKey -> Promise
+function runOcrSite(r, status = () => {}) {
+  if (r.ocrDone) return Promise.resolve(r.ocrResult);
+  if (ocrJobs[r.site.key]) return ocrJobs[r.site.key];
+  ocrJobs[r.site.key] = (async () => {
+    const att = files.find((x) => x.name === r.site.attFile);
+    const satp = files.find((x) => x.name === r.site.satpFile);
+    if (!att && !satp) throw new Error("ไม่พบไฟล์ของไซต์นี้ในรายการที่โหลด");
     let ocr = ocrCache[r.site.key];
-    if (!ocr) { ocr = await ocrSite(pdfjs, r, att?.bytes, satp?.bytes, (s) => { status.textContent = s; }); ocrCache[r.site.key] = ocr; }
+    if (!ocr) { ocr = await ocrSite(pdfjs, r, att?.bytes, satp?.bytes, status); ocrCache[r.site.key] = ocr; }
     const found = ocrChecks(ocr, r.site, r.facts);
     r.issues = r.issues.filter((i) => !i.ocr).concat(found);
     r.issues.sort((a, b) => (a.level || 9) - (b.level || 9));
-    r.summary = summarize(r.issues);
-    status.textContent = `OCR เสร็จ: อ่าน ${ocr.raw.length} รูป พบประเด็น ${found.filter((i) => i.severity !== "info").length} ข้อ (เพิ่มเข้าแท็บ "ประเด็น" และ Excel แล้ว)`;
+    applyDecisions(r);
+    r.summary = summarize(r.issues); r.summary.textStatus = r.summary.status;
+    r.ocrDone = true; r.ocrResult = { ocr, found };
     renderSummaryRow(r);
+    return r.ocrResult;
+  })().finally(() => { delete ocrJobs[r.site.key]; });
+  return ocrJobs[r.site.key];
+}
+async function ocrPanel(r, wrap) {
+  const status = el("p", { class: "hint ocr-status" }, r.ocrDone ? "" : "กำลังเตรียม OCR…");
+  wrap.append(status);
+  try {
+    const { ocr, found } = await runOcrSite(r, (s) => { status.textContent = s; });
+    status.textContent = `OCR อ่าน ${ocr.raw.length} รูป พบประเด็น ${found.filter((i) => i.severity !== "info").length} ข้อ (รวมอยู่ในแท็บ "ประเด็น" และ Excel แล้ว)`;
     const t = el("table", { class: "tbl" }, el("tr", {}, ...["ผล", "Section", "หน้า", "ประเด็น"].map((h) => el("th", {}, h))));
     for (const i of found) t.append(el("tr", {}, el("td", {}, el("span", { class: "pill " + (i.severity === "fail" ? "fail" : i.severity) }, i.severity === "warn" ? "เตือน" : "ข้อมูล")), el("td", {}, i.section), el("td", {}, i.page ?? ""), el("td", { class: "msg" }, i.msg)));
     wrap.append(t, el("h3", {}, "ข้อความที่ OCR อ่านได้ (ตัดสั้น)"));
@@ -683,7 +739,7 @@ function renderSummaryRow(r) {
   const row = rows.find((tr) => tr.children[1].textContent === r.site.folder && tr.children[0].textContent === r.facts.code);
   if (!row) return;
   row.children[9].replaceChildren(pill(combineStatus(r))); row.children[10].textContent = r.summary.fail; row.children[11].textContent = r.summary.warn;
-  const h3 = $("#details h3"); if (h3 && h3.textContent.startsWith(`${r.facts.code} — ${r.site.folder}`)) h3.replaceChildren(`${r.facts.code} — ${r.site.folder}`, " ", pill(r.summary.status));
+  refreshDetailHeader(r);
 }
 
 // ---------- ฐานความรู้ ----------
