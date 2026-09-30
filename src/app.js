@@ -174,6 +174,7 @@ async function runCheck() {
       onProgress: (p) => { prog.textContent = `กำลังอ่าน ${p.done + 1}/${p.total}: ${p.file}`; },
     });
     run = { results, errors, when: new Date().toLocaleString("th-TH") };
+    for (const k of Object.keys(reviewCache)) delete reviewCache[k];
     for (const r of results) { applyDecisions(r); r.summary = summarize(r.issues); reviews[r.site.key] = loadReview(r); }
     prog.textContent = `เสร็จ ${results.length} ไซต์ ${errors.length ? `(อ่านไม่ได้ ${errors.length} ไฟล์)` : ""}`;
     renderResults();
@@ -398,7 +399,15 @@ function saveReview(r) { localStorage.setItem(reviewKey(r), JSON.stringify(revie
 
 // ตรวจรูปอัตโนมัติต่อจากการตรวจข้อความ ทีละไซต์ในพื้นหลัง — แท็บตรวจรูปที่เปิดระหว่างนั้นจะรอผลชุดเดียวกัน
 const reviewJobs = {}; // siteKey -> Promise
+const reviewCache = {}; // siteKey -> ผลตัดสินรูปล่าสุด (รูป + การจัดกลุ่ม) เปิดแท็บซ้ำแสดงทันทีโดยไม่คำนวณใหม่
 function reviewSite(r, status = () => {}) {
+  const c = reviewCache[r.site.key];
+  if (c && !reviewJobs[r.site.key]) {
+    // จัดกลุ่มใหม่ตามผลตัดสินปัจจุบัน (ROM อาจกด Accept/Reject ไปแล้ว)
+    const need = [], autoOk = [], decided = [];
+    for (const e of c.entries) { const it = e.item; if (it.verdict && it.by !== "ระบบ") decided.push(e); else if (it.verdict === "accept" && it.autoAccepted) autoOk.push(e); else need.push(e); }
+    return Promise.resolve({ items: c.items, need, autoOk, decided, topicNotes: c.topicNotes, allRefs: c.allRefs, FLOOR: c.FLOOR });
+  }
   if (!reviewJobs[r.site.key]) reviewJobs[r.site.key] = decideSiteImages(r, status).finally(() => { delete reviewJobs[r.site.key]; });
   return reviewJobs[r.site.key];
 }
@@ -597,6 +606,7 @@ async function decideSiteImages(r, status = () => {}) {
   }
   rv.reviewed = true;
   saveReview(r);
+  reviewCache[r.site.key] = { items, entries: [...need, ...autoOk, ...decided], topicNotes, allRefs, FLOOR };
   return { items, need, autoOk, decided, topicNotes, allRefs, FLOOR };
 }
 
@@ -614,7 +624,8 @@ async function reviewPanel(r, status = () => {}) {
     el("span", { class: "pill warn" }, `ต้องให้ ROM ตรวจ ${need.length}`), " ",
     el("span", { class: "pill ok" }, `ผ่านอัตโนมัติ ${autoOk.length}`), " ",
     el("span", { class: "pill info" }, `ROM ตัดสินแล้ว ${decided.length}`), " ",
-    el("button", { class: "btn small", onclick: () => { for (const it of rv.items) if (!it.verdict) setVerdict(r, it, "accept"); wrap.querySelectorAll(".review-item").forEach((c) => c.dispatchEvent(new Event("refresh"))); } }, "Accept ที่เหลือทั้งหมด"),
+    el("button", { class: "btn small", onclick: () => { for (const it of rv.items) if (!it.verdict) setVerdict(r, it, "accept"); wrap.querySelectorAll(".review-item").forEach((c) => c.dispatchEvent(new Event("refresh"))); } }, "Accept ที่เหลือทั้งหมด"), " ",
+    el("button", { class: "btn small", title: "คำนวณใหม่ เช่น หลังแก้เกณฑ์หรือมีรูปอ้างอิงเพิ่ม", onclick: async () => { delete reviewCache[r.site.key]; const st = el("p", { class: "hint" }, "กำลังตรวจรูปใหม่…"); wrap.replaceWith(st); st.replaceWith(await reviewPanel(r, (t) => { st.textContent = t; })); } }, "ตรวจรูปใหม่"),
     el("span", { class: "hint" }, `เทียบกับรูปอ้างอิง ${allRefs.length} รูปจาก ${new Set(allRefs.map((x) => x.site)).size} ไซต์ตัวอย่างของโปรไฟล์นี้ · เกณฑ์ผ่านอัตโนมัติปรับตามหัวข้อ (ขั้นต่ำ ${pct(FLOOR)} แก้ได้ที่ "เกณฑ์ตรวจ")`));
   wrap.append(summary);
   if (topicNotes.length) wrap.append(el("div", { class: "auto-note" }, "จำนวนรูปต่างจากไซต์ตัวอย่าง: ", el("ul", {}, ...topicNotes.map((t) => el("li", {}, t)))));
