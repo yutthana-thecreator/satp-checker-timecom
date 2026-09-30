@@ -359,12 +359,12 @@ async function harvestAllAsSamples() {
   btn.disabled = false;
 }
 
-async function reviewPanel(r, status = () => {}) {
+// ตัดสินรูปทุกรูปของไซต์ (ไม่สร้าง DOM) → { error, items, need, autoOk, decided, topicNotes, allRefs, FLOOR }
+async function decideSiteImages(r, status = () => {}) {
   const profileKey = r.facts.profile || "L:" + r.facts.nearestProfile;
   const { error, items } = await collectSiteImages(r, status);
-  if (error) return el("p", {}, error);
+  if (error) return { error };
   const rv = reviews[r.site.key];
-  const wrap = el("div", {});
   const allRefs = (await refVectorsForProfile(profileKey)).filter((x) => x.site !== r.facts.code);
   const refByTopic = {}; for (const x of allRefs) (refByTopic[topicOf(x.section, x.topic)] ||= []).push(x);
   const rejectVecs = kb.imageDecisions.filter((d) => d.verdict === "reject" && d.emb).map((d) => ({ ...d, vec: decodeEmb(d.emb) }));
@@ -431,7 +431,16 @@ async function reviewPanel(r, status = () => {}) {
     else need.push(entry);
   }
   saveReview(r);
+  return { items, need, autoOk, decided, topicNotes, allRefs, FLOOR };
+}
 
+async function reviewPanel(r, status = () => {}) {
+  const res = await decideSiteImages(r, status);
+  if (res.error) return el("p", {}, res.error);
+  const { items, need, autoOk, decided, topicNotes, allRefs, FLOOR } = res;
+  const rv = reviews[r.site.key];
+  const pct = (x) => `${Math.round(x * 100)}%`;
+  const wrap = el("div", {});
   // ---------- แสดงผล ----------
   // รูปอ้างอิงที่คล้ายที่สุด (ดาวน์โหลดรูปย่อตามต้องการ) แสดงเฉพาะรูปที่ต้องให้ ROM ตรวจ
   const grid = (list, withRefs) => { const g = el("div", { class: "review-grid" }); for (const e of list) g.append(reviewCard(r, e.item, e.it.im, e.it.pageText, withRefs ? e.similar : null)); return g; };
@@ -604,6 +613,7 @@ if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
       renderFileList();
     },
     runCheck, harvestAllAsSamples: () => harvestSites(run.results, "sample", $("#progress")), get result() { return run; },
+    decideSiteImages, reviews,
     backfillEmbeddings: (profile) => backfillEmbeddings(embedImage, encodeEmb, (t) => { $("#progress").textContent = t; }, profile), loadEmbedder: () => loadEmbedder((t) => { $("#progress").textContent = t; }), refVectorsForProfile, decodeEmb, cosine, embedImage, files: () => files, reviews, ocrCache, wb: () => buildWorkbook(run.results, reviews, { when: run.when, reviewer: "", version: VERSION }),
   };
 }
