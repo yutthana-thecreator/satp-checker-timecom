@@ -2,7 +2,7 @@
 import { analyzeFiles, DEFAULT_CRITERIA } from "./engine/index.js";
 import { MASTERFILE_DATE, SITES } from "./data/sites.js";
 import { buildWorkbook, reviewStats } from "./ui/report.js";
-import { pageImageCanvases, aHash, hamming, blurScore, thumb, pixelDigest } from "./ui/images.js";
+import { pageImageCanvases, aHash, hamming, blurScore, thumb, pixelDigest, renderPage } from "./ui/images.js";
 import { ocrSite } from "./ui/ocr.js";
 import { ocrChecks } from "./engine/ocrRules.js";
 import { summarize } from "./engine/rules.js";
@@ -208,7 +208,7 @@ function renderResults() {
 }
 const cssId = (s) => s.replace(/[^a-zA-Z0-9]/g, "_");
 
-function showDetail(r) {
+function showDetail(r, showInfo = false) {
   const box = $("#details");
   const facts = r.facts;
   const S = r.site.satp;
@@ -236,8 +236,8 @@ function showDetail(r) {
   if (r.facts.customerAccepted) tabs.append(tabIssues, el("span", { class: "hint" }, "ลูกค้าตรวจรับแล้ว — ไม่ต้องตรวจรูป / OCR"));
   else tabs.append(tabIssues, tabReview, tabOcr);
   box.replaceChildren(el("div", { class: "detail" }, el("h3", {}, `${facts.code} — ${r.site.folder}`, " ", pill(r.summary.status)), head, tabs, body));
-  body.append(issuesTable(r));
-  box.scrollIntoView({ behavior: "smooth", block: "start" });
+  body.append(issuesTable(r, showInfo));
+  if (!showInfo) box.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function issuesTable(r, showInfo = false) {
@@ -252,21 +252,82 @@ function issuesTable(r, showInfo = false) {
   if (!rows.length) return wrap;
   const t = el("table", { class: "tbl issues" }, el("tr", {}, ...["ระดับ", "ผล", "กฎ", "Section", "หน้า", "ประเด็น", "ใครตรวจต่อ", "การตัดสินใจ ROM"].map((h) => el("th", {}, h))));
   wrap.append(t);
-  const refresh = () => { applyDecisions(r); r.summary = summarize(r.issues); renderSummaryRow(r); wrap.replaceWith(issuesTable(r, showInfo)); };
+  const viewer = el("div", { class: "page-viewer" }); wrap.append(viewer);
+  const refresh = () => { applyDecisions(r); r.summary = summarize(r.issues); renderSummaryRow(r); showDetail(r, showInfo); };
   for (const i of rows) {
-    // ปุ่มตัดสินใจเฉพาะ "เตือน" (ระบบไม่แน่ใจ) — ข้อมูลและข้อผิดที่ระบบยืนยันได้ไม่ต้องตัดสิน
-    const needsHuman = i.severity === "warn" && !r.facts.customerAccepted;
+    // เตือน → ROM ตัดสินและระบบเรียนรู้ใช้กับทุกไซต์ · ไม่ผ่าน → ROM ยอมรับได้เฉพาะไซต์นี้ (ไม่เรียนรู้)
+    const isFail = i.severity === "fail" && !r.facts.customerAccepted, isWarn = i.severity === "warn" && !r.facts.customerAccepted;
     let cell;
     if (i.learned) {
-      cell = el("td", {}, el("span", { class: "pill " + (i.learned.decision === "accept" ? "ok" : "warn") }, i.learned.decision === "accept" ? "ยอมรับแล้ว" : "ยืนยันปัญหา"), ` ${i.learned.by || ""} ${i.learned.at}`, i.learned.reason ? ` — ${i.learned.reason}` : "", " ", el("button", { class: "btn small", onclick: () => { forgetDecision(i, r.facts); refresh(); renderKb(); } }, "ลบ"));
-    } else if (needsHuman) {
+      const siteOnly = i.learned.scope === "site";
+      cell = el("td", {}, el("span", { class: "pill " + (i.learned.decision === "accept" ? "ok" : "warn") }, i.learned.decision === "accept" ? (siteOnly ? "ยอมรับแล้ว (เฉพาะไซต์นี้)" : "ยอมรับแล้ว") : "ยืนยันปัญหา"), ` ${i.learned.by || ""} ${i.learned.at}`, i.learned.reason ? ` — ${i.learned.reason}` : "", " ", el("button", { class: "btn small", onclick: () => { forgetDecision(i, r.facts, i.learned.scope || "all"); refresh(); renderKb(); } }, "ยกเลิก"));
+    } else if (isWarn) {
       const reason = el("input", { type: "text", placeholder: "เหตุผล (ถ้ามี)", size: "14" });
       const go = (d) => { recordDecision(i, r.facts, d, reason.value.trim(), $("#reviewer").value.trim()); refresh(); renderKb(); };
       cell = el("td", {}, el("button", { class: "btn small", onclick: () => go("accept") }, "ยอมรับ"), " ", el("button", { class: "btn small", onclick: () => go("confirm") }, "ยืนยันปัญหา"), " ", reason);
-    } else cell = el("td", { class: "hint" }, i.severity === "fail" ? "ระบบยืนยันได้เอง" : "");
-    t.append(el("tr", {}, el("td", {}, LV[i.level]), el("td", {}, el("span", { class: "pill " + (i.severity === "fail" ? "fail" : i.severity) }, i.severity === "fail" ? "ไม่ผ่าน" : i.severity === "warn" ? "เตือน" : "ข้อมูล"), i.origSeverity ? el("div", { class: "hint" }, `(เดิม ${i.origSeverity})`) : null), el("td", {}, i.rule), el("td", {}, i.section), el("td", {}, i.page ?? ""), el("td", { class: "msg" }, i.msg), el("td", {}, i.who), cell));
+    } else if (isFail) {
+      const reason = el("input", { type: "text", placeholder: "เหตุผลที่ยอมรับ", size: "14" });
+      cell = el("td", {}, el("button", { class: "btn small", title: "ROM ตรวจสอบแล้วว่ายอมรับได้ — มีผลเฉพาะไซต์นี้ ระบบไม่นำไปใช้กับไซต์อื่น", onclick: () => { if (!reason.value.trim()) { alert("ระบุเหตุผลที่ยอมรับก่อน"); return; } recordDecision(i, r.facts, "accept", reason.value.trim(), $("#reviewer").value.trim(), "site"); refresh(); renderKb(); } }, "ยอมรับ (ไซต์นี้)"), " ", reason, el("div", { class: "hint" }, "ระบบยืนยันได้เอง"));
+    } else cell = el("td", { class: "hint" }, "");
+    const pageCell = i.page ? el("td", {}, el("button", { class: "btn small", title: "แสดงหน้าเอกสารและไฮไลต์จุดที่พบ", onclick: () => showIssuePage(r, i, viewer) }, `หน้า ${i.page}`)) : el("td", {}, "");
+    t.append(el("tr", {}, el("td", {}, LV[i.level]), el("td", {}, el("span", { class: "pill " + (i.severity === "fail" ? "fail" : i.severity) }, i.severity === "fail" ? "ไม่ผ่าน" : i.severity === "warn" ? "เตือน" : "ข้อมูล"), i.origSeverity ? el("div", { class: "hint" }, `(เดิม ${i.origSeverity})`) : null), el("td", {}, i.rule), el("td", {}, i.section), pageCell, el("td", { class: "msg" }, i.msg), el("td", {}, i.who), cell));
   }
   return wrap;
+}
+
+// ---------- แสดงหน้าเอกสาร + ไฮไลต์จุดที่พบ ----------
+const docCache = {}; // fileName -> pdfjs document
+async function openDoc(fileName) {
+  if (docCache[fileName]) return docCache[fileName];
+  const f = files.find((x) => x.name === fileName);
+  if (!f) return null;
+  return (docCache[fileName] = await pdfjs.getDocument({ data: f.bytes.slice(), verbosity: 0 }).promise);
+}
+// คำที่จะไฮไลต์จากข้อความประเด็น: ข้อความใน '…' ก่อน ไม่มีก็ใช้ IP / slot / ตัวเลข
+function highlightTerms(msg) {
+  const quoted = [...msg.matchAll(/'([^']{2,})'/g)].map((m) => m[1]);
+  if (quoted.length) return quoted;
+  return [...new Set([...msg.matchAll(/\b\d{1,3}(?:\.\d{1,3}){3}\b|SH\d+\/SL\d+|-?\d+(?:[.,]\d+)+|\b\d{2,}\b/g)].map((m) => m[0]))];
+}
+async function showIssuePage(r, issue, viewer) {
+  const isAtt = /^ATT|^Attachment/.test(issue.section);
+  const fileName = isAtt ? r.site.attFile : r.site.satpFile;
+  viewer.replaceChildren(el("p", { class: "hint" }, `กำลังเปิด ${fileName} หน้า ${issue.page}…`));
+  viewer.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  const doc = await openDoc(fileName);
+  if (!doc) { viewer.replaceChildren(el("p", { class: "hint" }, "ไม่พบไฟล์ในรายการที่โหลด")); return; }
+  let pageNo = issue.page;
+  const render = async () => {
+    const scale = 1.4;
+    const canvas = await renderPage(pdfjs, doc, pageNo, scale);
+    const page = await doc.getPage(pageNo);
+    const vp = page.getViewport({ scale });
+    const terms = pageNo === issue.page ? highlightTerms(issue.msg).map((t) => t.toLowerCase()) : [];
+    let hits = 0;
+    if (terms.length) {
+      const tc = await page.getTextContent();
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "rgba(255, 210, 0, 0.45)"; ctx.strokeStyle = "#d00"; ctx.lineWidth = 2;
+      for (const it of tc.items) {
+        const str = (it.str || "").toLowerCase();
+        if (!str.trim() || !terms.some((t) => str.includes(t))) continue;
+        const [a, b, c, d, e, f] = pdfjs.Util.transform(vp.transform, it.transform);
+        const h = Math.hypot(c, d), w = it.width * scale;
+        ctx.fillRect(e - 2, f - h - 2, w + 4, h + 4); ctx.strokeRect(e - 2, f - h - 2, w + 4, h + 4);
+        hits++;
+      }
+    }
+    page.cleanup();
+    const nav = el("div", { class: "row" },
+      el("strong", {}, `${isAtt ? "Attachment" : "SATP"} หน้า ${pageNo}/${doc.numPages}`), " ",
+      el("button", { class: "btn small", onclick: () => { if (pageNo > 1) { pageNo--; render(); } } }, "◀"), " ",
+      el("button", { class: "btn small", onclick: () => { if (pageNo < doc.numPages) { pageNo++; render(); } } }, "▶"), " ",
+      el("span", { class: "hint" }, pageNo === issue.page ? (hits ? `ไฮไลต์ ${hits} จุด: ${highlightTerms(issue.msg).join(", ")}` : "ไม่พบข้อความที่ตรงในหน้านี้ (อาจอยู่ในรูป/ตาราง) — ดูตาม section ${issue.section}") : ""), " ",
+      el("button", { class: "btn small", onclick: () => viewer.replaceChildren() }, "ปิด"));
+    canvas.className = "page-canvas";
+    viewer.replaceChildren(nav, canvas);
+  };
+  await render();
 }
 
 // ---------- 10/11. ตรวจรูป ----------

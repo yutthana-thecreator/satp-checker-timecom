@@ -27,14 +27,17 @@ export function issueSignature(issue, facts) {
   return `${issue.rule}|${issue.section}|${facts.nodeType || ""}|${facts.profile || "L:" + (facts.nearestProfile || "")}|${msg}`;
 }
 
-export function findDecision(issue, facts) {
-  const sig = issueSignature(issue, facts);
+// scope "all" = ใช้กับประเด็นชนิดเดียวกันทุกไซต์ (เรียนรู้) · "site" = เฉพาะไซต์นี้ (ROM ตรวจแล้วยอมรับเป็นรายกรณี ไม่เรียนรู้)
+const siteSig = (issue, facts) => `S:${facts.code}|${issue.page ?? ""}|${issueSignature(issue, facts)}`;
+export function findDecision(issue, facts, scope = null) {
+  const sSig = siteSig(issue, facts), sig = issueSignature(issue, facts);
+  if (scope !== "all") { const d = kb.decisions.find((x) => x.sig === sSig); if (d || scope === "site") return d || null; }
   return kb.decisions.find((d) => d.sig === sig) || null;
 }
 
-export function recordDecision(issue, facts, decision, reason, by) {
-  const sig = issueSignature(issue, facts);
-  const d = { sig, decision, reason: reason || "", by: by || "", at: new Date().toLocaleString("th-TH"), rule: issue.rule, section: issue.section, example: issue.msg, site: facts.code, count: 1 };
+export function recordDecision(issue, facts, decision, reason, by, scope = "all") {
+  const sig = scope === "site" ? siteSig(issue, facts) : issueSignature(issue, facts);
+  const d = { sig, scope, decision, reason: reason || "", by: by || "", at: new Date().toLocaleString("th-TH"), rule: issue.rule, section: issue.section, example: issue.msg, site: facts.code, count: 1 };
   const i = kb.decisions.findIndex((x) => x.sig === sig);
   if (i >= 0) { d.count = (kb.decisions[i].count || 1) + 1; kb.decisions[i] = d; } else kb.decisions.push(d);
   saveKb();
@@ -42,8 +45,8 @@ export function recordDecision(issue, facts, decision, reason, by) {
   return d;
 }
 
-export function forgetDecision(issue, facts) {
-  const sig = issueSignature(issue, facts);
+export function forgetDecision(issue, facts, scope = "all") {
+  const sig = scope === "site" ? siteSig(issue, facts) : issueSignature(issue, facts);
   kb.decisions = kb.decisions.filter((d) => d.sig !== sig);
   saveKb();
   deleteRow("issue_decisions", sig);
@@ -54,8 +57,9 @@ export function deleteDecisionRecord(d) { kb.decisions = kb.decisions.filter((x)
 export function applyDecisions(result) {
   if (result.facts.customerAccepted) return;
   for (const i of result.issues) {
-    if (i.severity === "fail" && i.who === "ระบบ") continue; // ข้อผิดที่ระบบยืนยันได้เอง ไม่ต้องเรียนรู้
-    const d = findDecision(i, result.facts);
+    // ข้อผิดที่ระบบยืนยันได้เอง: ไม่เรียนรู้ข้ามไซต์ แต่ ROM ยอมรับเฉพาะไซต์นี้ได้
+    if (i.origSeverity) { i.severity = i.origSeverity; delete i.origSeverity; } // คืนค่าเดิมก่อนใช้การตัดสินใจล่าสุด (รองรับการยกเลิก)
+    const d = findDecision(i, result.facts, i.severity === "fail" && i.who === "ระบบ" ? "site" : null);
     if (!d) { delete i.learned; continue; }
     i.learned = d;
     if (d.decision === "accept") { i.origSeverity = i.origSeverity || i.severity; i.severity = "info"; }
