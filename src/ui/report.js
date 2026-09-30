@@ -12,12 +12,16 @@ export function buildWorkbook(results, reviews, meta) {
   sum.push([], ["ตรวจเมื่อ", meta.when], ["ผู้ตรวจ", meta.reviewer || ""], ["เวอร์ชัน", meta.version]);
   XLSX.utils.book_append_sheet(wb, aoa(sum, [10, 26, 12, 12, 18, 10, 22, 5, 8, 16, 7, 7, 9, 9, 11, 12, 40, 40]), "สรุป");
 
-  const iss = [["ไซต์", "ระดับ", "ผล", "กฎ", "Section", "หน้า", "ประเด็น", "ใครตรวจต่อ"]];
-  for (const r of results) for (const i of r.issues) iss.push([r.facts.code, LV[i.level] || "-", SEV[i.severity], i.rule, i.section, i.page ?? "", i.msg, i.who]);
-  XLSX.utils.book_append_sheet(wb, aoa(iss, [10, 14, 8, 6, 20, 5, 90, 10]), "ประเด็น");
+  const iss = [["ไซต์", "ระดับ", "ผล", "ผลเดิม (ก่อน ROM ตัดสิน)", "กฎ", "Section", "หน้า", "ประเด็น", "ใครตรวจต่อ", "การตัดสินใจ ROM", "ขอบเขต", "เหตุผล", "โดย", "เมื่อ"]];
+  for (const r of results) for (const i of r.issues) {
+    const d = i.learned;
+    iss.push([r.facts.code, LV[i.level] || "-", SEV[i.severity], i.origSeverity ? SEV[i.origSeverity] : "", i.rule, i.section, i.page ?? "", i.msg, i.who,
+      d ? (d.decision === "accept" ? "ยอมรับ" : "ยืนยันปัญหา") : "", d ? (d.scope === "site" ? "เฉพาะไซต์นี้" : "ทุกไซต์ (เรียนรู้)") : "", d?.reason || "", d?.by || "", d?.at || ""]);
+  }
+  XLSX.utils.book_append_sheet(wb, aoa(iss, [10, 14, 8, 12, 6, 20, 5, 90, 10, 14, 16, 30, 12, 18]), "ประเด็น");
 
   const rv = [["ไซต์", "หัวข้อ", "หน้า", "รูปที่", "ผล", "เหตุผล", "ผู้ตรวจ", "เวลา", "ระบบตรวจพบ"]];
-  for (const r of results) for (const it of reviews[r.site.key]?.items || []) rv.push([r.facts.code, it.section, it.page, it.idx + 1, it.verdict === "accept" ? "Accept" : it.verdict === "reject" ? "Reject" : "", it.reason || "", it.by || "", it.at || "", it.auto || ""]);
+  for (const r of results) for (const it of reviews[r.site.key]?.items || []) rv.push([r.facts.code, it.label || it.section, it.page, it.idx + 1, it.verdict === "accept" ? (it.autoAccepted ? "Accept (อัตโนมัติ)" : "Accept") : it.verdict === "reject" ? "Reject" : "", it.reason || "", it.by || "", it.at || "", it.auto || ""]);
   XLSX.utils.book_append_sheet(wb, aoa(rv, [10, 30, 5, 6, 8, 30, 12, 18, 40]), "ตรวจรูป");
 
   const facts = [["ไซต์", "Station Name", "Model", "SW", "IP", "ติดตั้ง", "Acceptance", "Power (V)", "Ground (Ω)", "ทิศ", "โมดูล", "Shelf", "โปรไฟล์", "ไม่ตรงโปรไฟล์"]];
