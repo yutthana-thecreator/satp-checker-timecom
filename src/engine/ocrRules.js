@@ -111,11 +111,17 @@ export function ocrChecks(ocr, site, facts, ctx = {}) {
     const L = buildLayouts(ctx.inventory, code)[facts.profile];
     if (L && L.sites >= 3) {
       const here = {}; for (const r of rows) (here[`${r.shelf}/${r.slot}`] ||= new Set()).add(r.card);
+      const PASSIVE = new Set(["PF", "FAN", "SHFPNL", "MFC", "8SP", "8FAN", "8DC30"]); // การ์ด/โมดูลพื้นฐาน ไม่ใช้ตัดสินว่า "ขาด" (OCR มักหลุดแถวเหล่านี้)
       const odd = [], missing = [];
       for (const [k, cards] of Object.entries(here)) { const exp = L.slots[k]; if (!exp) { odd.push(`${k} ${[...cards].join("/")} (ไซต์ตัวอย่างไม่มีการ์ดที่ slot นี้)`); continue; } for (const c of cards) if (!exp[c]) odd.push(`${k} ${c} (ตัวอย่างมี ${Object.keys(exp).join("/")})`); }
-      for (const [k, exp] of Object.entries(L.slots)) for (const [c, n] of Object.entries(exp)) if (n / L.sites >= 0.7 && !here[k]?.has(c)) missing.push(`${k} ${c} (${n}/${L.sites} ไซต์มี)`);
+      // แถวที่อ่านได้น้อยกว่าไซต์ตัวอย่างชัดเจน = OCR หลุดแถว → ไม่ตัดสิน "ขาด" แค่แจ้ง
+      const rowCounts = Object.values(ctx.inventory || {}).filter((v) => v.profile === facts.profile && v.site !== code).map((v) => v.rows.length).sort((a, b) => a - b);
+      const median = rowCounts.length ? rowCounts[Math.floor(rowCounts.length / 2)] : 0;
+      const incomplete = median && rows.length < median * 0.8;
+      for (const [k, exp] of Object.entries(L.slots)) for (const [c, n] of Object.entries(exp)) if (n / L.sites >= 0.7 && !PASSIVE.has(c) && !here[k]?.has(c)) missing.push(`${k} ${c} (${n}/${L.sites} ไซต์มี)`);
       if (odd.length) add("O09", "warn", "Attachment 1.4 Inventory", page, `การ์ดอยู่ต่างจากผังไซต์ตัวอย่าง ${facts.profile}: ${odd.join("; ")}`);
-      if (missing.length) add("O09", "warn", "Attachment 1.4 Inventory", page, `ไม่พบการ์ดที่ไซต์ตัวอย่างส่วนใหญ่มี: ${missing.join("; ")}`);
+      if (missing.length && !incomplete) add("O09", "warn", "Attachment 1.4 Inventory", page, `ไม่พบการ์ดที่ไซต์ตัวอย่างส่วนใหญ่มี: ${missing.join("; ")}`);
+      else if (missing.length) add("O09", "info", "Attachment 1.4 Inventory", page, `OCR อ่านได้ ${rows.length} แถว น้อยกว่าไซต์ตัวอย่าง (ค่ากลาง ${median}) — ไม่พบ ${missing.join("; ")} อาจเพราะอ่านไม่ครบ ให้คนดู`);
       if (!odd.length && !missing.length) add("O09", "info", "Attachment 1.4 Inventory", page, `ผังการ์ด ${rows.length} แถวตรงกับไซต์ตัวอย่าง ${facts.profile} (${L.sites} ไซต์)`, "ระบบ");
     }
     // O10 Serial number ซ้ำกับไซต์อื่น (screenshot ถูกนำมาใช้ซ้ำ หรือการ์ดย้ายไซต์)
