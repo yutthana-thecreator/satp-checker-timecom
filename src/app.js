@@ -7,7 +7,7 @@ import { ocrSite } from "./ui/ocr.js";
 import { ocrChecks } from "./engine/ocrRules.js";
 import { summarize } from "./engine/rules.js";
 import { setLearnedProfiles } from "./engine/profiles.js";
-import { kb, applyDecisions, recordDecision, forgetDecision, deleteDecisionRecord, learnProfile, forgetProfile, addRefImage, refImagesFor, refImagesForProfile, refVectorsForProfile, refThumb, backfillEmbeddings, setRefDigests, ensureThumbs, removeRefImage, listRefKeys, isReferenceSource, recordImageDecision, findImageDecision, recordSectionCount, expectedCount, topicOf, exportKb, importKb, kbStats, syncFromCloud, uploadLocalToCloud } from "./ui/learn.js";
+import { kb, applyDecisions, recordDecision, forgetDecision, deleteDecisionRecord, learnProfile, forgetProfile, addRefImage, refImagesFor, refImagesForProfile, refVectorsForProfile, refThumb, backfillEmbeddings, setRefDigests, ensureThumbs, removeRefImage, listRefKeys, isReferenceSource, recordImageDecision, findImageDecision, recordSectionCount, expectedCount, topicOf, kbStats, syncFromCloud, uploadLocalToCloud } from "./ui/learn.js";
 import { cloud, initCloud } from "./ui/cloud.js";
 import { embedder, loadEmbedder, embedImage, encodeEmb, decodeEmb, cosine, rank } from "./ui/embed.js";
 
@@ -55,7 +55,7 @@ async function init() {
   $("#clear-history").addEventListener("click", () => { if (confirm("ล้างประวัติการตรวจทั้งหมดในเบราว์เซอร์นี้?")) { localStorage.removeItem("satp:history"); renderHistory(); } });
   $("#clear-reviews").addEventListener("click", () => { if (!confirm("ล้างผล Accept/Reject ของทุกไซต์ในเบราว์เซอร์นี้? (รูปอ้างอิงในฐานความรู้ยังอยู่)")) return; for (const k of Object.keys(localStorage)) if (k.startsWith("satp:review:")) localStorage.removeItem(k); for (const k of Object.keys(reviews)) delete reviews[k]; if (run) { for (const r of run.results) reviews[r.site.key] = { items: [] }; renderResults(); } });
   $("#clear-all").addEventListener("click", async () => {
-    if (!confirm("ล้างข้อมูลทั้งหมดในเบราว์เซอร์นี้: ประวัติ, ผลตรวจรูป, ฐานความรู้ (การตัดสินใจ/โปรไฟล์ที่เรียนรู้/รูปอ้างอิง), เกณฑ์ที่แก้ไว้, ชื่อผู้ตรวจ? แนะนำให้กด 'ส่งออกฐานความรู้' ก่อน")) return;
+    if (!confirm("ล้างข้อมูลทั้งหมดในเบราว์เซอร์นี้: ประวัติ, ผลตรวจรูป, สำเนาฐานความรู้ในเครื่อง, เกณฑ์ที่แก้ไว้, ชื่อผู้ตรวจ? (ฐานความรู้บนคลาวด์ของทีมไม่ถูกลบ และจะซิงก์กลับมาเมื่อเปิดหน้าใหม่)")) return;
     for (const k of Object.keys(localStorage)) if (k.startsWith("satp:")) localStorage.removeItem(k);
     await new Promise((res) => { const req = indexedDB.deleteDatabase("satp-kb"); req.onsuccess = req.onerror = req.onblocked = () => res(); });
     location.reload();
@@ -641,12 +641,9 @@ async function renderKb() {
   for (const d of kb.decisions.slice().reverse().slice(0, 30)) dt.append(el("tr", {}, el("td", {}, d.rule), el("td", {}, d.section), el("td", {}, el("span", { class: "pill " + (d.decision === "accept" ? "ok" : "warn") }, d.decision === "accept" ? "ยอมรับ" : "ยืนยันปัญหา")), el("td", {}, d.reason), el("td", { class: "hint msg" }, d.example), el("td", {}, d.by), el("td", {}, d.at), el("td", {}, d.count || 1), el("td", {}, el("button", { class: "btn small", onclick: () => { deleteDecisionRecord(d); renderKb(); } }, "ลบ"))));
   const pt = el("table", { class: "tbl" }, el("tr", {}, ...["โปรไฟล์", "ชื่อ", "ตัวอย่าง", "ไซต์", "โดย", ""].map((h) => el("th", {}, h))));
   for (const p of kb.profiles) pt.append(el("tr", {}, el("td", {}, p.id), el("td", {}, p.name), el("td", {}, p.samples), el("td", {}, (p.sites || []).join(", ")), el("td", {}, `${p.by || ""} ${p.at || ""}`), el("td", {}, el("button", { class: "btn small", onclick: () => { forgetProfile(p.id); setLearnedProfiles(kb.profiles); renderKb(); } }, "ลบ"))));
-  const exp = el("button", { class: "btn", onclick: async () => { const blob = new Blob([await exportKb()], { type: "application/json" }); const a = el("a", { href: URL.createObjectURL(blob), download: `satp_knowledge_${new Date().toISOString().slice(0, 10)}.json` }); a.click(); } }, "ส่งออกฐานความรู้ (JSON)");
-  const clr = el("button", { class: "btn small danger", onclick: async () => { if (!confirm("ล้างฐานความรู้ทั้งหมด (การตัดสินใจ, โปรไฟล์ที่เรียนรู้, รูปอ้างอิง)? แนะนำให้ส่งออกก่อน")) return; kb.decisions = []; kb.profiles = []; kb.imageDecisions = []; localStorage.setItem("satp:kb", JSON.stringify(kb)); await new Promise((res) => { const req = indexedDB.deleteDatabase("satp-kb"); req.onsuccess = req.onerror = req.onblocked = () => res(); }); setLearnedProfiles([]); renderKb(); } }, "ล้างฐานความรู้");
-  const imp = el("label", { class: "btn" }, "นำเข้าฐานความรู้", el("input", { type: "file", accept: ".json", hidden: "", onchange: async (e) => { const f = e.target.files[0]; if (!f) return; const m = await importKb(await f.text()); setLearnedProfiles(kb.profiles); alert(`นำเข้าแล้ว ${m.added} รายการ`); renderKb(); } }));
   const up = cloud.ready ? el("button", { class: "btn small", onclick: async (e) => { if (!confirm("ส่งฐานความรู้ในเครื่องนี้ทั้งหมดขึ้นคลาวด์ของทีม? (รายการที่มีอยู่แล้วจะถูกเขียนทับด้วยของเครื่องนี้)")) return; e.target.disabled = true; const n = await uploadLocalToCloud((t) => { e.target.textContent = t; }); e.target.textContent = `อัปโหลดแล้ว ${n} รายการ`; } }, "อัปโหลดฐานความรู้ในเครื่องขึ้นคลาวด์") : null;
-  const note = cloud.ready ? "ฐานความรู้ซิงก์กับคลาวด์ของทีม — ทุกการตัดสินใจและรูปอ้างอิงใหม่ขึ้นคลาวด์ทันที ปุ่มล้างมีผลเฉพาะเครื่องนี้" : cloud.enabled ? "เชื่อมต่อฐานความรู้ทีมไม่ได้ — ข้อมูลอยู่ในเครื่องนี้ (กดซิงก์ที่แถบด้านบนเมื่อออนไลน์)" : "ฐานความรู้อยู่ในเบราว์เซอร์เครื่องนี้ — ส่งออกไฟล์ให้ทีมนำเข้าเพื่อใช้ร่วมกัน (ไม่มีข้อมูลเอกสาร มีแต่ลายเซ็นประเด็น, รูปย่อที่ Accept และค่าที่วัด)";
-  box.replaceChildren(head, el("div", { class: "row" }, exp, imp, up, clr, el("span", { class: "hint" }, note)),
+  const note = cloud.ready ? "ฐานความรู้ซิงก์กับคลาวด์ของทีม — ทุกการตัดสินใจและรูปอ้างอิงใหม่ขึ้นคลาวด์ทันที ลบรายการได้ที่ปุ่ม ลบ/ยกเลิก/× ของรายการนั้น" : cloud.enabled ? "เชื่อมต่อฐานความรู้ทีมไม่ได้ — ข้อมูลอยู่ในเครื่องนี้ (กดซิงก์ที่แถบด้านบนเมื่อออนไลน์)" : "ฐานความรู้อยู่ในเบราว์เซอร์เครื่องนี้ (ยังไม่ได้ตั้งค่าคลาวด์)";
+  box.replaceChildren(head, el("div", { class: "row" }, up, el("span", { class: "hint" }, note)),
     el("h3", {}, "การตัดสินใจประเด็น (ล่าสุด 30)"), dt, el("h3", {}, "โปรไฟล์ที่เรียนรู้จาก ROM"), pt.children.length > 1 ? pt : el("p", { class: "hint" }, "ยังไม่มี — ไซต์ที่ไม่ตรงโปรไฟล์ P1–P5 จะมีปุ่ม 'ROM ยืนยัน: ใช้ไซต์นี้เป็นอ้างอิง'"));
 }
 
