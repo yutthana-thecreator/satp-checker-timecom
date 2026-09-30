@@ -814,7 +814,7 @@ if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
     harvestInventory: async () => { // OCR เฉพาะ screenshot Inventory ของทุกไซต์ที่โหลด → เก็บผังการ์ด/serial ขึ้นคลาวด์
       const prog = $("#progress"); let n = 0, i = 0;
       for (const r of run.results) {
-        i++; const att = files.find((x) => x.name === r.site.attFile); if (!att) continue;
+        i++; const att = files.find((x) => x.name === r.site.attFile); if (!att || kb.inventory?.[r.facts.code]) continue; // ข้ามไซต์ที่เก็บแล้ว
         const ocr = await ocrSite(pdfjs, r, att.bytes, null, (t) => { prog.textContent = `inventory ${i}/${run.results.length} ${r.facts.code}: ${t}`; }, ["1.4"]);
         const rows = parseInventory(ocr.inventory);
         if (rows.length) { recordInventory(r.facts.code, { profile: r.facts.profile || "L:" + r.facts.nearestProfile, rows, page: rows[0].page }); n++; }
