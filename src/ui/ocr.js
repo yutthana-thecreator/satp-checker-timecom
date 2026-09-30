@@ -36,7 +36,7 @@ export async function ocrCanvas(canvas, onStatus) {
 }
 
 // รวบรวมข้อความ OCR ตาม section ของไซต์ → โครงสร้างที่ ocrChecks ต้องการ
-export async function ocrSite(pdfjs, r, attBytes, satpBytes, onStatus) {
+export async function ocrSite(pdfjs, r, attBytes, satpBytes, onStatus, only = null) {
   const A = r.site.att;
   const out = { inventory: [], power: [], neSetup: [], neLabel: [], fiberScope: [], blockDiagram: [], raw: [] };
   const secs = Object.entries(A?.sections || {}).sort((a, b) => a[1] - b[1]);
@@ -45,7 +45,7 @@ export async function ocrSite(pdfjs, r, attBytes, satpBytes, onStatus) {
   const jobs = [];
   if (A && attBytes) {
     const doc = await pdfjs.getDocument({ data: attBytes.slice(), verbosity: 0 }).promise;
-    const plan = [["1.4", "inventory"], ["1.5", "power"], ["1.9", "neSetup"], ["1.15", "fiberScope"]];
+    const plan = [["1.4", "inventory"], ["1.5", "power"], ["1.9", "neSetup"], ["1.15", "fiberScope"]].filter(([sec]) => !only || only.includes(sec));
     for (const [sec, bucket] of plan) {
       const rg = rangeOf(sec, doc.numPages);
       if (!rg) continue;
@@ -53,7 +53,7 @@ export async function ocrSite(pdfjs, r, attBytes, satpBytes, onStatus) {
     }
     // ป้าย NE ID = หน้าที่มี caption (b)
     const labelPage = (A.captions?.b || [])[0]?.page;
-    if (labelPage) jobs.push({ doc, page: labelPage, bucket: "neLabel", onlyFirst: false });
+    if (labelPage && !only) jobs.push({ doc, page: labelPage, bucket: "neLabel", onlyFirst: false });
     for (const j of jobs) {
       onStatus?.(`OCR ${++done}/${jobs.length + 1}: Attachment หน้า ${j.page}`);
       const page = await j.doc.getPage(j.page);
@@ -67,7 +67,7 @@ export async function ocrSite(pdfjs, r, attBytes, satpBytes, onStatus) {
     }
     await doc.destroy();
   }
-  if (satpBytes && r.site.satp?.blockDiagram) {
+  if (satpBytes && r.site.satp?.blockDiagram && !only) {
     onStatus?.(`OCR: SATP Block Diagram`);
     const doc = await pdfjs.getDocument({ data: satpBytes.slice(), verbosity: 0 }).promise;
     const pno = r.site.satp.blockDiagram.no;

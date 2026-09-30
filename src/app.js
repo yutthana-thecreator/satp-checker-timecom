@@ -5,10 +5,10 @@ import { buildWorkbook, reviewStats } from "./ui/report.js";
 import { pageImageCanvases, aHash, hamming, blurScore, thumb, pixelDigest, renderPage } from "./ui/images.js";
 import { ocrSite, ocrLabels } from "./ui/ocr.js";
 import { labelExpectations, checkLabelText, labelTopicOf } from "./engine/labels.js";
-import { ocrChecks } from "./engine/ocrRules.js";
+import { ocrChecks, parseInventory } from "./engine/ocrRules.js";
 import { summarize } from "./engine/rules.js";
 import { setLearnedProfiles } from "./engine/profiles.js";
-import { kb, applyDecisions, recordDecision, forgetDecision, deleteDecisionRecord, learnProfile, forgetProfile, addRefImage, refImagesFor, refImagesForProfile, refVectorsForProfile, refThumb, backfillEmbeddings, setRefDigests, ensureThumbs, removeRefImage, listRefKeys, isReferenceSource, recordImageDecision, findImageDecision, recordSectionCount, expectedCount, topicOf, kbStats, syncFromCloud, uploadLocalToCloud } from "./ui/learn.js";
+import { kb, applyDecisions, recordDecision, forgetDecision, deleteDecisionRecord, learnProfile, forgetProfile, addRefImage, refImagesFor, refImagesForProfile, refVectorsForProfile, refThumb, backfillEmbeddings, setRefDigests, ensureThumbs, removeRefImage, listRefKeys, isReferenceSource, recordImageDecision, findImageDecision, recordSectionCount, expectedCount, recordInventory, topicOf, kbStats, syncFromCloud, uploadLocalToCloud } from "./ui/learn.js";
 import { cloud, initCloud } from "./ui/cloud.js";
 import { embedder, loadEmbedder, embedImage, encodeEmb, decodeEmb, cosine, rank } from "./ui/embed.js";
 
@@ -180,7 +180,7 @@ async function runCheck() {
     renderResults();
     saveHistory();
     await harvestSignedSites(results, prog);
-    await reviewAllInBackground(results, prog);
+    if (!window.satpTest?.skipBackground) await reviewAllInBackground(results, prog); // ทดสอบ: ข้ามงานพื้นหลังได้
   } catch (e) {
     prog.textContent = "ผิดพลาด: " + e.message;
     console.error(e);
@@ -719,7 +719,10 @@ function runOcrSite(r, status = () => {}) {
     if (!att && !satp) throw new Error("ไม่พบไฟล์ของไซต์นี้ในรายการที่โหลด");
     let ocr = ocrCache[r.site.key];
     if (!ocr) { ocr = await ocrSite(pdfjs, r, att?.bytes, satp?.bytes, status); ocrCache[r.site.key] = ocr; }
-    const found = ocrChecks(ocr, r.site, r.facts);
+    const rows = parseInventory(ocr.inventory);
+    if (rows.length) recordInventory(r.facts.code, { profile: r.facts.profile || "L:" + r.facts.nearestProfile, rows, page: rows[0].page });
+    r.inventory = rows;
+    const found = ocrChecks(ocr, r.site, r.facts, { rows, inventory: kb.inventory });
     r.issues = r.issues.filter((i) => !i.ocr).concat(found);
     r.issues.sort((a, b) => (a.level || 9) - (b.level || 9));
     applyDecisions(r);
@@ -808,6 +811,16 @@ if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
     },
     runCheck, harvestAllAsSamples: () => harvestSites(run.results, "sample", $("#progress")), get result() { return run; },
     decideSiteImages, reviews,
+    harvestInventory: async () => { // OCR เฉพาะ screenshot Inventory ของทุกไซต์ที่โหลด → เก็บผังการ์ด/serial ขึ้นคลาวด์
+      const prog = $("#progress"); let n = 0, i = 0;
+      for (const r of run.results) {
+        i++; const att = files.find((x) => x.name === r.site.attFile); if (!att) continue;
+        const ocr = await ocrSite(pdfjs, r, att.bytes, null, (t) => { prog.textContent = `inventory ${i}/${run.results.length} ${r.facts.code}: ${t}`; }, ["1.4"]);
+        const rows = parseInventory(ocr.inventory);
+        if (rows.length) { recordInventory(r.facts.code, { profile: r.facts.profile || "L:" + r.facts.nearestProfile, rows, page: rows[0].page }); n++; }
+      }
+      prog.textContent = `เก็บ inventory แล้ว ${n} ไซต์`; return n;
+    },
     backfillDigests: async () => { // เติมลายนิ้วมือพิกเซลให้รูปอ้างอิงของไซต์ที่โหลดอยู่ (ใช้ครั้งเดียวกับชุดตัวอย่าง)
       const prog = $("#progress"); let n = 0, i = 0;
       for (const r of run.results) {

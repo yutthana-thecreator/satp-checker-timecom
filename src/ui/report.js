@@ -30,6 +30,10 @@ export function buildWorkbook(results, reviews, meta) {
     facts.push([r.facts.code, S.header.station, S.header.model, S.software?.release || "", S.header.ip, `${S.header.installStart} – ${S.header.installEnd}`, S.header.acceptanceDate, `${S.power?.main ?? ""} / ${S.power?.standby ?? ""}`, `${S.ground?.rackToBusbar.raw ?? ""} / ${S.ground?.shelfToRack.raw ?? ""}`, r.facts.degrees, [...(r.facts.modules || [])].join(", "), JSON.stringify(r.facts.shelves || {}), r.facts.profile || "", (r.facts.profileMismatches || []).join("; ")]);
   }
   XLSX.utils.book_append_sheet(wb, aoa(facts, [10, 32, 12, 20, 14, 24, 11, 14, 14, 5, 18, 16, 8, 40]), "ข้อมูลไซต์");
+
+  const inv = [["ไซต์", "Shelf", "Slot", "การ์ด", "Software Load", "CLEI", "Part Number", "Serial Number", "หน้า (Attachment)"]];
+  for (const r of results) for (const x of r.inventory || []) inv.push([r.facts.code, x.shelf, x.slot, x.card, x.sw, x.clei, x.part, x.serial, x.page]);
+  if (inv.length > 1) XLSX.utils.book_append_sheet(wb, aoa(inv, [10, 6, 6, 12, 22, 14, 18, 16, 10]), "Inventory");
   return wb;
 }
 

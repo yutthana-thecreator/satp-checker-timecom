@@ -12,7 +12,7 @@ const DB = "satp-kb", STORE = "refimg";
 export const kb = load();
 
 function load() {
-  const empty = () => ({ version: 2, decisions: [], profiles: [], imageDecisions: [], sectionStats: {} });
+  const empty = () => ({ version: 2, decisions: [], profiles: [], imageDecisions: [], sectionStats: {}, inventory: {} });
   try { return Object.assign(empty(), JSON.parse(localStorage.getItem(KEY) || "{}")); }
   catch { return empty(); }
 }
@@ -211,6 +211,14 @@ export function recordSectionCount(profile, section, topic, site, n) {
   saveKb();
   pushRow("section_stats", key, st);
 }
+// ---------- Card Inventory ต่อไซต์ (จาก OCR) — ใช้สร้างผังการ์ดต่อโปรไฟล์และตรวจ serial ซ้ำข้ามไซต์ · เก็บในตาราง section_stats ด้วย key "INV|<ไซต์>" ----------
+export function recordInventory(site, { profile, rows, page, source = "ocr" }) {
+  const rec = { site, profile, rows, page, source, at: new Date().toLocaleString("th-TH") };
+  kb.inventory[site] = rec;
+  saveKb();
+  pushRow("section_stats", "INV|" + site, rec);
+  return rec;
+}
 export function expectedCount(profile, section, topic) {
   const st = kb.sectionStats[`${profile}|${topicOf(section, topic)}`];
   if (!st) return null;
@@ -261,7 +269,7 @@ export async function syncFromCloud(onProgress = () => {}) {
   for (const d of c.issue_decisions) { const i = kb.decisions.findIndex((x) => x.sig === d.sig); if (i >= 0) kb.decisions[i] = strip(d); else kb.decisions.push(strip(d)); n.decisions++; }
   for (const d of c.image_decisions) { kb.imageDecisions = kb.imageDecisions.filter((x) => x.hash !== d.hash); kb.imageDecisions.push(strip(d)); n.imageDecisions++; }
   for (const p of c.learned_profiles) { const i = kb.profiles.findIndex((x) => matchKey(x.match) === p.key); const rec = strip(p); if (i >= 0) { rec.id = kb.profiles[i].id; kb.profiles[i] = rec; } else { rec.id = "L" + (kb.profiles.length + 1); kb.profiles.push(rec); } n.profiles++; }
-  for (const st of c.section_stats) { kb.sectionStats[st.key] = strip(st); n.sectionStats++; }
+  for (const st of c.section_stats) { if (st.key.startsWith("INV|")) { kb.inventory[st.key.slice(4)] = strip(st); continue; } kb.sectionStats[st.key] = strip(st); n.sectionStats++; }
   saveKb();
   // เก็บเฉพาะข้อมูลย่อของรูปอ้างอิงใหม่ (ไม่มีรูปย่อ) — รูปย่อจะถูกดาวน์โหลดเมื่อเปิดดูโปรไฟล์นั้นครั้งแรก (ensureThumbs)
   const localKeys = new Set(await listRefKeys());
@@ -306,6 +314,7 @@ export async function uploadLocalToCloud(onProgress = () => {}) {
   for (const d of kb.imageDecisions) { await pushRow("image_decisions", d.hash, d); n++; }
   for (const p of kb.profiles) { await pushRow("learned_profiles", matchKey(p.match), p); n++; }
   for (const [k, st] of Object.entries(kb.sectionStats)) { await pushRow("section_stats", k, st); n++; }
+  for (const [site, inv] of Object.entries(kb.inventory || {})) { await pushRow("section_stats", "INV|" + site, inv); n++; }
   const refs = await listRefImages();
   let i = 0;
   for (const r of refs) { onProgress(`อัปโหลดรูปอ้างอิง ${++i}/${refs.length}`); if (await pushRefImage(r)) n++; }
