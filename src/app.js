@@ -179,6 +179,7 @@ async function runCheck() {
     renderResults();
     saveHistory();
     await harvestSignedSites(results, prog);
+    await reviewAllInBackground(results, prog);
   } catch (e) {
     prog.textContent = "ผิดพลาด: " + e.message;
     console.error(e);
@@ -186,8 +187,24 @@ async function runCheck() {
 }
 
 function pill(status) {
-  const cls = status.startsWith("ผ่าน (") || status === "ผ่าน" ? "ok" : status === "ไม่ผ่าน" ? "fail" : "warn";
+  const cls = /^ผ่าน(?! \(ยังไม่ตรวจรูป)/.test(status) ? "ok" : status.startsWith("ไม่ผ่าน") ? "fail" : "warn";
   return el("span", { class: "pill " + cls }, status);
+}
+
+// สถานะรวม = ข้อความ (กฎ R01–R26) + รูป (ตัดสินอัตโนมัติ/ROM) — ผ่านต่อเมื่อทั้งสองส่วนผ่าน
+function combineStatus(r) {
+  const s = r.summary;
+  if (s.textStatus == null) s.textStatus = s.status;
+  const t = s.textStatus;
+  if (r.facts.customerAccepted || !r.site.att) { s.status = t; return t; }
+  const rv = reviews[r.site.key];
+  if (!rv?.reviewed) s.status = t === "ไม่ผ่าน" ? t : t + " (ยังไม่ตรวจรูป)";
+  else {
+    const st = reviewStats(rv);
+    s.status = t === "ไม่ผ่าน" ? (st.reject || st.pending ? `ไม่ผ่าน (รูป ${st.reject ? "Reject " + st.reject : ""}${st.pending ? " รอ ROM " + st.pending : ""})`.replace(/\s+\)/, ")") : t)
+      : st.reject ? `ไม่ผ่าน (รูป Reject ${st.reject})` : st.pending ? `รอ ROM ตรวจรูป ${st.pending}` : t;
+  }
+  return s.status;
 }
 
 function renderResults() {
@@ -200,7 +217,7 @@ function renderResults() {
     const tr = el("tr", { class: "clickable", onclick: () => showDetail(r) },
       el("td", {}, r.facts.code), el("td", {}, r.site.folder), el("td", {}, r.site.satp?.header.project || ""), el("td", {}, r.site.satp?.header.model || ""), el("td", {}, r.facts.nodeKind || "?"), el("td", {}, `${r.facts.nodeType || "?"}_${r.facts.suffix || ""}`),
       el("td", {}, r.facts.profile || el("span", { class: "pill info" }, `ไม่มี → ROM ตรวจเอง`)),
-      el("td", {}, r.facts.degrees ?? "-"), el("td", {}, r.facts.power), el("td", {}, pill(r.summary.status)),
+      el("td", {}, r.facts.degrees ?? "-"), el("td", {}, r.facts.power), el("td", {}, pill(combineStatus(r))),
       el("td", {}, r.summary.fail), el("td", {}, r.summary.warn), el("td", { id: "rv-" + cssId(r.site.key) }, r.facts.customerAccepted ? "–" : `${rv.accept} / ${rv.reject} / ${rv.pending}`));
     t.append(tr);
   }
@@ -336,7 +353,26 @@ const REVIEW_SECTIONS = [["1.8", "1.8 Visual Inspection"], ["1.4", "1.4 Inventor
 
 function reviewKey(r) { return `satp:review:${r.site.key}:${r.site.attFile}`; }
 function loadReview(r) { try { return JSON.parse(localStorage.getItem(reviewKey(r)) || "null") || { items: [] }; } catch { return { items: [] }; } }
-function saveReview(r) { localStorage.setItem(reviewKey(r), JSON.stringify(reviews[r.site.key])); const c = $("#rv-" + cssId(r.site.key)); if (c) { const s = reviewStats(reviews[r.site.key]); c.textContent = `${s.accept} / ${s.reject} / ${s.pending}`; } }
+function saveReview(r) { localStorage.setItem(reviewKey(r), JSON.stringify(reviews[r.site.key])); const c = $("#rv-" + cssId(r.site.key)); if (c) { const s = reviewStats(reviews[r.site.key]); c.textContent = `${s.accept} / ${s.reject} / ${s.pending}`; } renderSummaryRow(r); }
+
+// ตรวจรูปอัตโนมัติต่อจากการตรวจข้อความ ทีละไซต์ในพื้นหลัง — แท็บตรวจรูปที่เปิดระหว่างนั้นจะรอผลชุดเดียวกัน
+const reviewJobs = {}; // siteKey -> Promise
+function reviewSite(r, status = () => {}) {
+  if (!reviewJobs[r.site.key]) reviewJobs[r.site.key] = decideSiteImages(r, status).finally(() => { delete reviewJobs[r.site.key]; });
+  return reviewJobs[r.site.key];
+}
+async function reviewAllInBackground(results, prog) {
+  const todo = results.filter((r) => r.site.att && !r.facts.customerAccepted);
+  let i = 0;
+  for (const r of todo) {
+    i++;
+    const c = $("#rv-" + cssId(r.site.key)); if (c) c.textContent = "กำลังตรวจ…";
+    try { await reviewSite(r, (t) => { prog.textContent = `ตรวจรูป ${i}/${todo.length} ${r.facts.code}: ${t}`; }); }
+    catch (e) { console.warn("review", r.facts.code, e); }
+    renderSummaryRow(r);
+  }
+  prog.textContent = `เสร็จ ${results.length} ไซต์ · ตรวจรูปแล้ว ${todo.length} ไซต์`;
+}
 
 const hashCache = {}; // `${site}|${page}|${idx}` -> hash
 
@@ -516,12 +552,13 @@ async function decideSiteImages(r, status = () => {}) {
     else if (item.verdict === "accept" && item.autoAccepted) autoOk.push(entry);
     else need.push(entry);
   }
+  rv.reviewed = true;
   saveReview(r);
   return { items, need, autoOk, decided, topicNotes, allRefs, FLOOR };
 }
 
 async function reviewPanel(r, status = () => {}) {
-  const res = await decideSiteImages(r, status);
+  const res = await reviewSite(r, status);
   if (res.error) return el("p", {}, res.error);
   const { items, need, autoOk, decided, topicNotes, allRefs, FLOOR } = res;
   const rv = reviews[r.site.key];
@@ -645,7 +682,8 @@ function renderSummaryRow(r) {
   const rows = [...$("#summary").querySelectorAll("tr.clickable")];
   const row = rows.find((tr) => tr.children[1].textContent === r.site.folder && tr.children[0].textContent === r.facts.code);
   if (!row) return;
-  row.children[9].replaceChildren(pill(r.summary.status)); row.children[10].textContent = r.summary.fail; row.children[11].textContent = r.summary.warn;
+  row.children[9].replaceChildren(pill(combineStatus(r))); row.children[10].textContent = r.summary.fail; row.children[11].textContent = r.summary.warn;
+  const h3 = $("#details h3"); if (h3 && h3.textContent.startsWith(`${r.facts.code} — ${r.site.folder}`)) h3.replaceChildren(`${r.facts.code} — ${r.site.folder}`, " ", pill(r.summary.status));
 }
 
 // ---------- ฐานความรู้ ----------
