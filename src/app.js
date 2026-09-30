@@ -382,7 +382,7 @@ async function showIssuePage(r, issue, viewer) {
       el("strong", {}, `${isAtt ? "Attachment" : "SATP"} หน้า ${pageNo}/${doc.numPages}`), " ",
       el("button", { class: "btn small", onclick: () => { if (pageNo > 1) { pageNo--; render(); } } }, "◀"), " ",
       el("button", { class: "btn small", onclick: () => { if (pageNo < doc.numPages) { pageNo++; render(); } } }, "▶"), " ",
-      el("span", { class: "hint" }, pageNo === issue.page ? (hits ? `ไฮไลต์ ${hits} จุด: ${highlightTerms(issue.msg).join(", ")}` : "ไม่พบข้อความที่ตรงในหน้านี้ (อาจอยู่ในรูป/ตาราง) — ดูตาม section ${issue.section}") : ""), " ",
+      el("span", { class: "hint" }, pageNo === issue.page ? (hits ? `ไฮไลต์ ${hits} จุด: ${highlightTerms(issue.msg).join(", ")}` : "ไม่พบข้อความที่ตรงในหน้านี้ (อาจอยู่ในรูป/ตาราง) — ดูตาม section " + issue.section) : ""), " ",
       el("button", { class: "btn small", onclick: () => viewer.replaceChildren() }, "ปิด"));
     canvas.className = "page-canvas";
     viewer.replaceChildren(nav, canvas);
@@ -737,10 +737,16 @@ async function ocrPanel(r, wrap) {
     const { ocr, found } = await runOcrSite(r, (s) => { status.textContent = s; });
     status.textContent = `OCR อ่าน ${ocr.raw.length} รูป พบประเด็น ${found.filter((i) => i.severity !== "info").length} ข้อ (รวมอยู่ในแท็บ "ประเด็น" และ Excel แล้ว)`;
     const t = el("table", { class: "tbl" }, el("tr", {}, ...["ผล", "Section", "หน้า", "ประเด็น"].map((h) => el("th", {}, h))));
-    for (const i of found) t.append(el("tr", {}, el("td", {}, el("span", { class: "pill " + (i.severity === "fail" ? "fail" : i.severity) }, i.severity === "warn" ? "เตือน" : "ข้อมูล")), el("td", {}, i.section), el("td", {}, i.page ?? ""), el("td", { class: "msg" }, i.msg)));
-    wrap.append(t, el("h3", {}, "ข้อความที่ OCR อ่านได้ (ตัดสั้น)"));
+    const viewer = el("div", { class: "page-viewer" });
+    for (const i of found) {
+      const open = () => showIssuePage(r, i, viewer);
+      t.append(el("tr", { class: i.page ? "clickable" : "", onclick: (e) => { if (i.page && e.target.tagName !== "BUTTON") open(); } },
+        el("td", {}, el("span", { class: "pill " + (i.severity === "fail" ? "fail" : i.severity) }, i.severity === "warn" ? "เตือน" : "ข้อมูล")), el("td", {}, i.section),
+        el("td", {}, i.page ? el("button", { class: "btn small", title: "แสดงหน้าเอกสาร", onclick: open }, `หน้า ${i.page}`) : ""), el("td", { class: "msg" }, i.msg)));
+    }
+    wrap.append(el("p", { class: "hint" }, "กดแถวหรือปุ่มหน้าเพื่อดูหน้าเอกสารจริง"), t, viewer, el("h3", {}, "ข้อความที่ OCR อ่านได้ (ตัดสั้น)"));
     const raw = el("table", { class: "tbl" }, el("tr", {}, ...["เอกสาร", "ส่วน", "หน้า", "ความมั่นใจ", "ข้อความ"].map((h) => el("th", {}, h))));
-    for (const x of ocr.raw) raw.append(el("tr", {}, el("td", {}, x.doc), el("td", {}, x.section), el("td", {}, x.page), el("td", {}, Math.round(x.confidence) + "%"), el("td", { class: "msg hint" }, x.text.replace(/\s+/g, " ").slice(0, 300))));
+    for (const x of ocr.raw) raw.append(el("tr", { class: "clickable", onclick: () => showIssuePage(r, { section: x.doc === "SATP" ? x.section : "Attachment " + x.section, page: x.page, msg: "" }, viewer) }, el("td", {}, x.doc), el("td", {}, x.section), el("td", {}, x.page), el("td", {}, Math.round(x.confidence) + "%"), el("td", { class: "msg hint" }, x.text.replace(/\s+/g, " ").slice(0, 300))));
     wrap.append(raw);
   } catch (e) { status.textContent = "OCR ผิดพลาด: " + e.message; console.error(e); }
   return wrap;
