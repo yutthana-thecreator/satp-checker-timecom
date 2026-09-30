@@ -67,3 +67,6 @@ header .cloud .hint { color: #fffc; }
 .topic-head { margin: 10px 0 4px; font-size: 13px; }
 .ref-item small { display: block; font-size: 10px; color: #555; text-align: center; max-width: 120px; }
 .ref-item.signed img { border-color: var(--blue); }
+.ref-strip.small { margin: 4px 0; padding: 4px; }
+.ref-strip.small img { height: 72px; }
+.review-item.accept .hint { color: #2a6; }

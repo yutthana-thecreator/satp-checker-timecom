@@ -47,6 +47,11 @@ export function pushRow(table, key, data) {
   if (!cloud.ready) return Promise.resolve(null);
   return sb.from(table).upsert({ key, data, ...stamp() }).then(check).catch(warn("upsert " + table));
 }
+export function pushRows(table, rows) { // rows: [{key, data}]
+  if (!cloud.ready || !rows.length) return Promise.resolve(null);
+  const st = stamp();
+  return sb.from(table).upsert(rows.map((r) => ({ key: r.key, data: r.data, ...st }))).then(check).catch(warn("upsert batch " + table));
+}
 export function deleteRow(table, key) {
   if (!cloud.ready) return Promise.resolve(null);
   return sb.from(table).delete().eq("key", key).then(check).catch(warn("delete " + table));

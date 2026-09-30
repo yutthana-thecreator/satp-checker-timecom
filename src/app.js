@@ -7,8 +7,9 @@ import { ocrSite } from "./ui/ocr.js";
 import { ocrChecks } from "./engine/ocrRules.js";
 import { summarize } from "./engine/rules.js";
 import { setLearnedProfiles } from "./engine/profiles.js";
-import { kb, applyDecisions, recordDecision, forgetDecision, deleteDecisionRecord, learnProfile, forgetProfile, addRefImage, refImagesFor, refImagesForProfile, ensureThumbs, removeRefImage, listRefKeys, isReferenceSource, recordImageDecision, findImageDecision, recordSectionCount, expectedCount, topicOf, exportKb, importKb, kbStats, syncFromCloud, uploadLocalToCloud } from "./ui/learn.js";
+import { kb, applyDecisions, recordDecision, forgetDecision, deleteDecisionRecord, learnProfile, forgetProfile, addRefImage, refImagesFor, refImagesForProfile, refVectorsForProfile, refThumb, backfillEmbeddings, ensureThumbs, removeRefImage, listRefKeys, isReferenceSource, recordImageDecision, findImageDecision, recordSectionCount, expectedCount, topicOf, exportKb, importKb, kbStats, syncFromCloud, uploadLocalToCloud } from "./ui/learn.js";
 import { cloud, initCloud } from "./ui/cloud.js";
+import { embedder, loadEmbedder, embedImage, encodeEmb, decodeEmb, cosine, rank } from "./ui/embed.js";
 
 const VERSION = "0.2.0";
 const PDFJS_URL = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs";
@@ -140,6 +141,7 @@ function loadCriteria() {
 const CRIT_LABELS = {
   dc48: ["แรงดัน -48 VDC (ค่าสัมบูรณ์)", ["min", "max"], "V"], hvdc: ["แรงดัน HVDC ~240 V", ["min", "max"], "V"], ac: ["แรงดัน AC (PSI-M)", ["min", "max"], "V"],
   groundMax: ["ค่ากราวด์สูงสุด", ["value"], "Ω"], groundAllowNonNumeric: ["ยอมรับกราวด์ N/A หรือ OL", ["value"], "bool"],
+  imageSim: ["รูปผ่านอัตโนมัติ: ความคล้ายขั้นต่ำ (ระบบปรับสูงขึ้นตามหัวข้อจากไซต์ตัวอย่าง)", ["value", "margin"], "0–1"],
   lossPerKmWarn: ["Loss/km เตือนเมื่อเกิน (span ยาว)", ["value", "minDistanceKm"], "dB/km, km"], shortSpanTotalLossWarn: ["Total loss เตือนเมื่อเกิน (span สั้น)", ["value"], "dB"],
   lossTolerance: ["ความคลาดเคลื่อน Total Loss vs TX−RX", ["value"], "dB"], shortSpanKm: ["span สั้น = น้อยกว่า", ["value"], "km"], calibrationCheck: ["ตรวจวันหมดอายุ calibration", ["value"], "bool"],
 };
@@ -152,7 +154,7 @@ function renderCriteria() {
       const inp = unit === "bool" ? el("input", { type: "checkbox" }) : el("input", { type: "number", step: "any", value: v ?? "" });
       if (unit === "bool") inp.checked = !!v;
       inp.addEventListener("change", () => { criteria[k][f] = unit === "bool" ? inp.checked : inp.value === "" ? null : +inp.value; saveCriteria(); });
-      return [f === "max" ? " – " : f === "minDistanceKm" ? " เมื่อระยะ ≥ " : "", inp];
+      return [f === "max" ? " – " : f === "minDistanceKm" ? " เมื่อระยะ ≥ " : f === "margin" ? " และไม่คล้าย section อื่นเกินกว่า +" : "", inp];
     });
     t.append(el("tr", {}, el("td", {}, label), el("td", {}, ...inputs), el("td", {}, unit === "bool" ? "" : unit), el("td", { class: "hint" }, criteria[k].source)));
   }
@@ -227,8 +229,7 @@ function showDetail(r) {
   const tabReview = el("button", { onclick: async () => {
     activate(tabReview);
     const st = el("p", { class: "hint" }, "กำลังดึงรูปจาก Attachment…"); body.replaceChildren(st);
-    await ensureThumbs(r.facts.profile || "L:" + r.facts.nearestProfile, (t) => { st.textContent = t; });
-    body.replaceChildren(await reviewPanel(r));
+    body.replaceChildren(await reviewPanel(r, (t) => { st.textContent = t; }));
   } }, "ตรวจรูป (Accept/Reject)");
   const tabOcr = el("button", { onclick: () => { activate(tabOcr); const wrap = el("div", {}); body.replaceChildren(wrap); ocrPanel(r, wrap); } }, "OCR screenshot");
   const activate = (b) => { for (const x of tabs.children) x.classList.toggle("active", x === b); };
@@ -321,6 +322,8 @@ async function harvestSites(list, source, prog) {
   if (!sites.length) return { sites: 0, added: 0 };
   const keys = await listRefKeys();
   const by = source === "signed" ? "ลูกค้าเซ็นแล้ว" : `ตัวอย่าง (${$("#reviewer").value.trim() || "ROM"})`;
+  let canEmbed = false;
+  try { await loadEmbedder((t) => { prog.textContent = t; }); canEmbed = true; } catch (e) { console.warn("embedder", e); }
   let added = 0, i = 0;
   for (const r of sites) {
     i++;
@@ -330,7 +333,9 @@ async function harvestSites(list, source, prog) {
     for (const it of items) {
       counts[topicOf(it.section, it.topic)] = (counts[topicOf(it.section, it.topic)] || 0) + 1;
       prog.textContent = `เก็บรูปอ้างอิง ${i}/${sites.length} — ${r.facts.code} หน้า ${it.page} (ใหม่ ${added})`;
-      const rec = await addRefImage({ profile: profileKey, section: it.section, topic: it.topic, site: r.facts.code, page: it.page, thumb: thumb(it.im.canvas, 320), hash: it.hash, by, source }, keys);
+      const th = thumb(it.im.canvas, 320);
+      const emb = canEmbed ? encodeEmb(await embedImage(th)) : "";
+      const rec = await addRefImage({ profile: profileKey, section: it.section, topic: it.topic, site: r.facts.code, page: it.page, thumb: th, hash: it.hash, by, source, emb }, keys);
       if (rec) added++;
     }
     const seenTopics = new Set();
@@ -354,60 +359,99 @@ async function harvestAllAsSamples() {
   btn.disabled = false;
 }
 
-async function reviewPanel(r) {
+async function reviewPanel(r, status = () => {}) {
   const profileKey = r.facts.profile || "L:" + r.facts.nearestProfile;
-  const { error, items } = await collectSiteImages(r);
+  const { error, items } = await collectSiteImages(r, status);
   if (error) return el("p", {}, error);
   const rv = reviews[r.site.key];
   const wrap = el("div", {});
-  const allRefs = await refImagesForProfile(profileKey);
-  const signedRefs = allRefs.filter((x) => isReferenceSource(x.source) && x.site !== r.facts.code);
-  let curLabel = null, curTopic = null, g = null;
+  const allRefs = (await refVectorsForProfile(profileKey)).filter((x) => x.site !== r.facts.code);
+  const refByTopic = {}; for (const x of allRefs) (refByTopic[topicOf(x.section, x.topic)] ||= []).push(x);
+  const rejectVecs = kb.imageDecisions.filter((d) => d.verdict === "reject" && d.emb).map((d) => ({ ...d, vec: decodeEmb(d.emb) }));
+  let canEmbed = allRefs.length > 0;
+  if (canEmbed) { try { await loadEmbedder(status); } catch (e) { console.warn("embedder", e); canEmbed = false; } }
+  const FLOOR = criteria.imageSim?.value ?? 0.7, MARGIN = criteria.imageSim?.margin ?? 0.03;
+  const pct = (x) => `${Math.round(x * 100)}%`;
+  const TH = topicThresholds(profileKey, allRefs, FLOOR);
+  const thOf = (tkey) => TH[tkey] ?? Math.max(FLOOR, 0.78);
+
+  // ---------- ตัดสินแต่ละรูป ----------
+  const need = [], autoOk = [], decided = [], topicNotes = [];
+  const seenTopic = new Set();
+  let done = 0;
   for (const it of items) {
-    if (it.label !== curLabel) { curLabel = it.label; curTopic = null; wrap.append(el("h3", {}, it.label)); }
+    status(`กำลังเทียบรูปกับรูปอ้างอิง ${++done}/${items.length}`);
+    const { im, page: p, idx, hash: h, key } = it;
     const tkey = topicOf(it.section, it.topic);
-    if (tkey !== curTopic) {
-      curTopic = tkey;
+    if (!seenTopic.has(tkey)) {
+      seenTopic.add(tkey);
       const n = items.filter((x) => topicOf(x.section, x.topic) === tkey).length;
       const exp = expectedCount(profileKey, it.section, it.topic);
-      const refs = allRefs.filter((x) => topicOf(x.section, x.topic) === tkey && x.thumb);
-      const head = el("div", { class: "topic-head" }, el("strong", {}, it.topic || it.label), ` · ${n} รูป`);
-      const outOfRange = exp && (n < exp.min || n > exp.max);
-      if (exp) head.append(el("span", { class: outOfRange ? "auto-note" : "hint" }, ` — ไซต์ตัวอย่างในโปรไฟล์นี้มี ${exp.min === exp.max ? exp.median : `${exp.min}–${exp.max}`} รูป (ค่ากลาง ${exp.median}, ${exp.sites} ไซต์)${outOfRange ? " ← จำนวนต่างจากตัวอย่าง" : ""}`));
-      wrap.append(head);
-      if (refs.length) {
-        const sorted = refs.slice().sort((a, b) => (a.source === "signed" ? 0 : a.source === "sample" ? 1 : 2) - (b.source === "signed" ? 0 : b.source === "sample" ? 1 : 2) || (b.ts || 0) - (a.ts || 0));
-        const strip = el("div", { class: "ref-strip" }, el("span", { class: "hint" }, `รูปอ้างอิง (${refs.length}): `));
-        const show = (list) => list.map((x) => el("span", { class: "ref-item " + (isReferenceSource(x.source) ? "signed" : "") }, el("img", { src: x.thumb, title: `${x.site} หน้า ${x.page} · ${x.by || ""} ${x.at}` }), el("small", {}, `${x.source === "signed" ? "ลูกค้าเซ็น" : x.source === "sample" ? "ตัวอย่าง" : "ROM"} · ${x.site}`), el("button", { class: "btn small", title: "ถอดออกจากรูปอ้างอิง", onclick: async (e) => { await removeRefImage(x.id); e.target.parentElement.remove(); renderKb(); } }, "×")));
-        strip.append(...show(sorted.slice(0, 6)));
-        if (sorted.length > 6) { const more = el("button", { class: "btn small", onclick: () => { more.replaceWith(...show(sorted.slice(6))); } }, `+${sorted.length - 6} รูป`); strip.append(more); }
-        wrap.append(strip);
-      }
-      g = el("div", { class: "review-grid" });
-      wrap.append(g);
+      if (exp && (n < exp.min || n > exp.max)) topicNotes.push(`${it.topic || it.label}: มี ${n} รูป แต่ไซต์ตัวอย่างมี ${exp.min === exp.max ? exp.median : `${exp.min}–${exp.max}`} รูป (${exp.sites} ไซต์)`);
     }
-    const { im, page: p, idx, hash: h, key } = it;
-    const blur = blurScore(im.canvas);
     let item = rv.items.find((x) => x.page === p && x.idx === idx);
     if (!item) { item = { section: it.label, page: p, idx, verdict: "", reason: "", by: "", at: "", hash: h }; rv.items.push(item); }
-    item.hash = h; item.topic = it.topic;
-    const auto = [];
-    // รูปซ้ำ = ขนาดพิกเซลเท่ากันและ hash ต่างไม่เกิน 4/256 บิต (ไม่นับรูปเดียวกันที่ถูกวางซ้ำในหน้าเดียว)
-    for (const [k2, v2] of Object.entries(hashCache)) if (k2 !== key && v2.w === im.width && v2.hh === im.height && k2.split("|").slice(0, 2).join("|") !== `${r.site.key}|${p}` && hamming(h, v2.h) <= 4) auto.push(`เหมือนรูป ${k2.split("|")[0]} หน้า ${k2.split("|")[1]}`);
-    const reused = signedRefs.find((x) => hamming(h, x.hash) <= 4);
-    if (reused) auto.push(`เหมือนรูปของไซต์ตัวอย่าง ${reused.site} (หน้า ${reused.page}) — รูปถูกนำมาใช้ซ้ำ?`);
-    if (blur < 15) auto.push(`ภาพอาจเบลอ (คมชัด ${blur.toFixed(0)})`);
+    item.hash = h; item.topic = it.topic; item.label = it.topic || it.label;
+    const flags = [];
+    for (const [k2, v2] of Object.entries(hashCache)) if (k2 !== key && v2.w === im.width && v2.hh === im.height && k2.split("|").slice(0, 2).join("|") !== `${r.site.key}|${p}` && hamming(h, v2.h) <= 4) flags.push(`เหมือนรูป ${k2.split("|")[0]} หน้า ${k2.split("|")[1]}`);
+    const reused = allRefs.find((x) => isReferenceSource(x.source) && hamming(h, x.hash) <= 4);
+    if (reused) flags.push(`เหมือนรูปของไซต์ตัวอย่าง ${reused.site} (หน้า ${reused.page}) — รูปถูกนำมาใช้ซ้ำ?`);
+    const blur = blurScore(im.canvas);
+    if (blur < 15) flags.push(`ภาพอาจเบลอ (คมชัด ${blur.toFixed(0)})`);
     const prev = findImageDecision(h);
-    if (prev && prev.verdict === "reject") auto.push(`รูปนี้เคยถูก Reject ที่ ${prev.site}: ${prev.reason} (${prev.by || ""})`);
-    item.auto = auto.join("; ");
-    g.append(reviewCard(r, item, im, it.pageText));
+    if (prev && prev.verdict === "reject") flags.push(`รูปนี้เคยถูก Reject ที่ ${prev.site}: ${prev.reason} (${prev.by || ""})`);
+    // เทียบกับรูปอ้างอิง
+    let similar = [], verdictNote = "", auto = false;
+    if (canEmbed) {
+      try {
+        const vec = await embedImage(thumb(im.canvas, 320));
+        item.emb = encodeEmb(vec);
+        const same = rank(vec, refByTopic[tkey] || [], 3);
+        const otherSec = rank(vec, allRefs.filter((x) => x.section !== it.section), 1); // section อื่น (เช่น screenshot มาอยู่ในหมวดรูปถ่าย)
+        const sibling = rank(vec, allRefs.filter((x) => x.section === it.section && topicOf(x.section, x.topic) !== tkey), 1); // หัวข้อย่อยอื่นใน section เดียวกัน (แจ้งอย่างเดียว)
+        const rej = rank(vec, rejectVecs, 1);
+        similar = same;
+        const s1 = same[0]?.sim ?? 0, so = otherSec[0]?.sim ?? 0, th = thOf(tkey);
+        item.sim = s1; item.match = same[0]?.ref.id || "";
+        if (rej[0] && rej[0].sim >= 0.95) flags.push(`คล้ายรูปที่เคยถูก Reject ที่ ${rej[0].ref.site} (${pct(rej[0].sim)}): ${rej[0].ref.reason}`);
+        const sibNote = sibling[0] && sibling[0].sim > s1 + MARGIN ? ` (คล้ายหัวข้อ "${sibling[0].ref.topic || sibling[0].ref.section}" ${pct(sibling[0].sim)} มากกว่า)` : "";
+        if (!same.length) verdictNote = "ยังไม่มีรูปอ้างอิงของหัวข้อนี้ในโปรไฟล์นี้";
+        else if (flags.length) verdictNote = `คล้ายรูปอ้างอิง ${pct(s1)} แต่มีข้อสังเกต`;
+        else if (s1 >= th && s1 + MARGIN >= so) { auto = true; verdictNote = `ผ่านอัตโนมัติ: คล้ายรูปอ้างอิงของ ${same[0].ref.site} ${pct(s1)} (เกณฑ์หัวข้อนี้ ${pct(th)})${sibNote}`; }
+        else if (so >= th && so > s1 + MARGIN) verdictNote = `น่าจะเป็นรูปของ "${otherSec[0].ref.topic || otherSec[0].ref.section}" (${pct(so)}) ไม่ใช่ "${it.topic || it.label}" (${pct(s1)})`;
+        else verdictNote = `คล้ายรูปอ้างอิงเพียง ${pct(s1)} (เกณฑ์หัวข้อนี้ ${pct(th)})${sibNote}`;
+      } catch (e) { console.warn("embed", e); verdictNote = "เทียบรูปไม่ได้: " + (e.message || e); }
+    } else verdictNote = allRefs.length ? "โมเดลเปรียบเทียบรูปโหลดไม่ได้ — ตรวจเอง" : "ยังไม่มีรูปอ้างอิงของโปรไฟล์นี้";
+    item.auto = [verdictNote, ...flags].join("; ");
+    if (auto && !item.verdict) { item.verdict = "accept"; item.by = "ระบบ"; item.at = new Date().toLocaleString("th-TH"); item.autoAccepted = true; }
+    else if (!auto && item.autoAccepted && item.by === "ระบบ") { item.verdict = ""; item.by = ""; item.at = ""; item.autoAccepted = false; } // เกณฑ์เปลี่ยน → ยกเลิกผลอัตโนมัติเดิม
+    const entry = { it, item, similar };
+    if (item.verdict && item.by !== "ระบบ") decided.push(entry);
+    else if (item.verdict === "accept" && item.autoAccepted) autoOk.push(entry);
+    else need.push(entry);
   }
-  if (!rv.items.length) wrap.append(el("p", {}, "ไม่พบรูปใน Attachment"));
   saveReview(r);
-  const bulk = el("div", { class: "row" },
+
+  // ---------- แสดงผล ----------
+  const grid = (list) => { const g = el("div", { class: "review-grid" }); for (const e of list) g.append(reviewCard(r, e.item, e.it.im, e.it.pageText, e.similar)); return g; };
+  const summary = el("div", { class: "row" },
+    el("span", { class: "pill warn" }, `ต้องให้ ROM ตรวจ ${need.length}`), " ",
+    el("span", { class: "pill ok" }, `ผ่านอัตโนมัติ ${autoOk.length}`), " ",
+    el("span", { class: "pill info" }, `ROM ตัดสินแล้ว ${decided.length}`), " ",
     el("button", { class: "btn small", onclick: () => { for (const it of rv.items) if (!it.verdict) setVerdict(r, it, "accept"); wrap.querySelectorAll(".review-item").forEach((c) => c.dispatchEvent(new Event("refresh"))); } }, "Accept ที่เหลือทั้งหมด"),
-    el("span", { class: "hint" }, `ไซต์จะ 'ผ่าน' ส่วนรูปเมื่อทุกรูปถูก Accept — Reject ต้องระบุเหตุผล · รูปอ้างอิงของโปรไฟล์นี้ ${allRefs.length} รูป จาก ${new Set(allRefs.map((x) => x.site)).size} ไซต์`));
-  wrap.prepend(bulk);
+    el("span", { class: "hint" }, `เทียบกับรูปอ้างอิง ${allRefs.length} รูปจาก ${new Set(allRefs.map((x) => x.site)).size} ไซต์ตัวอย่างของโปรไฟล์นี้ · เกณฑ์ผ่านอัตโนมัติปรับตามหัวข้อ (ขั้นต่ำ ${pct(FLOOR)} แก้ได้ที่ "เกณฑ์ตรวจ")`));
+  wrap.append(summary);
+  if (topicNotes.length) wrap.append(el("div", { class: "auto-note" }, "จำนวนรูปต่างจากไซต์ตัวอย่าง: ", el("ul", {}, ...topicNotes.map((t) => el("li", {}, t)))));
+  if (!items.length) wrap.append(el("p", {}, "ไม่พบรูปใน Attachment"));
+  const section = (title, list, open) => {
+    if (!list.length) return;
+    const g = grid(list); g.hidden = !open;
+    const btn = el("button", { class: "btn small", onclick: () => { g.hidden = !g.hidden; btn.textContent = (g.hidden ? "แสดง" : "ซ่อน") + ` (${list.length})`; } }, (open ? "ซ่อน" : "แสดง") + ` (${list.length})`);
+    wrap.append(el("h3", {}, title, " ", btn), g);
+  };
+  section("ต้องให้ ROM ตรวจ", need, true);
+  section("ผ่านอัตโนมัติ — คล้ายรูปอ้างอิงของไซต์ตัวอย่าง (กด Reject ได้ถ้าไม่เห็นด้วย)", autoOk, false);
+  section("ROM ตัดสินแล้ว", decided, false);
   return wrap;
 }
 
@@ -417,12 +461,42 @@ function setVerdict(r, item, v, reason, canvas) {
   saveReview(r);
   // เรียนรู้: Accept → เก็บเป็นรูปอ้างอิงของ (โปรไฟล์ × section) · Reject → จำ hash + เหตุผล
   const profileKey = r.facts.profile || "L:" + r.facts.nearestProfile;
-  if (v === "accept" && canvas) addRefImage({ profile: profileKey, section: item.section, topic: item.topic || "", site: r.facts.code, page: item.page, thumb: thumb(canvas, 320), hash: item.hash, by: item.by, source: "rom" }).then(renderKb);
-  recordImageDecision({ hash: item.hash, verdict: v, reason: item.reason, site: r.facts.code, section: item.section, by: item.by });
+  item.autoAccepted = false;
+  if (v === "accept" && canvas) addRefImage({ profile: profileKey, section: item.section, topic: item.topic || "", site: r.facts.code, page: item.page, thumb: thumb(canvas, 320), hash: item.hash, by: item.by, source: "rom", emb: item.emb || "" }).then(renderKb);
+  recordImageDecision({ hash: item.hash, verdict: v, reason: item.reason, site: r.facts.code, section: item.section, by: item.by, emb: v === "reject" ? item.emb || "" : "" });
   renderKb();
 }
 
-function reviewCard(r, item, im, pageText) {
+// เกณฑ์ความคล้ายต่อหัวข้อ = p10 ของ "ความคล้ายสูงสุดกับไซต์อื่นในหัวข้อเดียวกัน" ของรูปอ้างอิงเอง (leave-one-site-out) อย่างน้อย floor สูงสุด 0.90 · หัวข้อที่มีรูป < 8 ใช้ 0.78
+const thresholdCache = {};
+function topicThresholds(profileKey, refs, floor) {
+  const ck = `${profileKey}|${refs.length}|${floor}`;
+  if (thresholdCache[ck]) return thresholdCache[ck];
+  const byTopic = {}; for (const r of refs) (byTopic[topicOf(r.section, r.topic)] ||= []).push(r);
+  const out = {};
+  for (const [t, list] of Object.entries(byTopic)) {
+    if (list.length < 8) { out[t] = Math.max(floor, 0.78); continue; }
+    const sims = [];
+    for (const r of list) { let best = 0; for (const o of list) if (o.site !== r.site) { const s = cosine(r.vec, o.vec); if (s > best) best = s; } if (best) sims.push(best); }
+    sims.sort((a, b) => a - b);
+    const p10 = sims[Math.floor(sims.length * 0.1)] ?? 0.78;
+    out[t] = Math.min(0.9, Math.max(floor, p10));
+  }
+  return (thresholdCache[ck] = out);
+}
+
+function similarStrip(similar) {
+  if (!similar?.length) return null;
+  const strip = el("div", { class: "ref-strip small" }, el("span", { class: "hint" }, "รูปอ้างอิงที่คล้ายที่สุด: "));
+  for (const { ref, sim } of similar) {
+    const img = el("img", { alt: ref.site, title: `${ref.site} หน้า ${ref.page} · ${ref.source === "signed" ? "ลูกค้าเซ็น" : ref.source === "sample" ? "ตัวอย่าง" : "ROM"}` });
+    refThumb(ref.id).then((t) => { if (t) img.src = t; else img.remove(); });
+    strip.append(el("span", { class: "ref-item signed" }, img, el("small", {}, `${ref.site} · ${Math.round(sim * 100)}%`)));
+  }
+  return strip;
+}
+
+function reviewCard(r, item, im, pageText, similar = null) {
   const card = el("div", { class: "review-item " + item.verdict });
   const img = el("img", { src: thumb(im.canvas), loading: "lazy", alt: `หน้า ${item.page}` });
   const reasonSel = el("select", {}, el("option", { value: "" }, "เหตุผล Reject…"), ...REJECT_REASONS.map((x) => el("option", { value: x }, x)));
@@ -437,8 +511,9 @@ function reviewCard(r, item, im, pageText) {
     const reason = reasonSel.value === "อื่นๆ (ระบุ)" ? reasonTxt.value.trim() || "อื่นๆ" : reasonSel.value + (reasonTxt.value.trim() ? ": " + reasonTxt.value.trim() : "");
     setVerdict(r, item, "reject", reason, im.canvas); refresh();
   } }, "Reject");
-  card.append(...[img, el("div", { class: "cap" }, `หน้า ${item.page} รูปที่ ${item.idx + 1} · ${im.width}×${im.height}`, pageText ? el("div", { class: "hint" }, pageText.slice(0, 160)) : null),
-    item.auto ? el("div", { class: "auto-note" }, "ระบบ: " + item.auto) : null,
+  card.append(...[img, el("div", { class: "cap" }, el("strong", {}, item.label || item.section), ` · หน้า ${item.page} รูปที่ ${item.idx + 1} · ${im.width}×${im.height}`, pageText ? el("div", { class: "hint" }, pageText.slice(0, 160)) : null),
+    item.auto ? el("div", { class: item.autoAccepted ? "hint" : "auto-note" }, "ระบบ: " + item.auto) : null,
+    similarStrip(similar),
     el("div", { class: "act" }, accept, reject, reasonSel, reasonTxt), status].filter(Boolean));
   refresh();
   return card;
@@ -527,6 +602,7 @@ if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
       }
       renderFileList();
     },
-    runCheck, harvestAllAsSamples: () => harvestSites(run.results, "sample", $("#progress")), get result() { return run; }, files: () => files, reviews, ocrCache, wb: () => buildWorkbook(run.results, reviews, { when: run.when, reviewer: "", version: VERSION }),
+    runCheck, harvestAllAsSamples: () => harvestSites(run.results, "sample", $("#progress")), get result() { return run; },
+    backfillEmbeddings: (profile) => backfillEmbeddings(embedImage, encodeEmb, (t) => { $("#progress").textContent = t; }, profile), loadEmbedder: () => loadEmbedder((t) => { $("#progress").textContent = t; }), refVectorsForProfile, decodeEmb, cosine, embedImage, files: () => files, reviews, ocrCache, wb: () => buildWorkbook(run.results, reviews, { when: run.when, reviewer: "", version: VERSION }),
   };
 }

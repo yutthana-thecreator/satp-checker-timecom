@@ -11,6 +11,9 @@ export const DEFAULT_CRITERIA = {
   ac: { min: null, max: null, source: "ยังไม่มีตัวอย่าง" },
   // ที่มา: template 1.6 (< 1 Ohm)
   groundMax: { value: 1.0, source: "template 1.6" },
+  // รูปผ่านอัตโนมัติเมื่อคล้ายรูปอ้างอิงหัวข้อเดียวกัน ≥ เกณฑ์ของหัวข้อนั้น (p10 ของไซต์ตัวอย่าง อย่างน้อย value) และไม่คล้าย section อื่นเกินกว่า +margin
+  // คาลิเบรต leave-one-site-out บน 1,829 รูป: ผ่านอัตโนมัติ 92%, จับรูปที่วางผิด section ได้ 96%
+  imageSim: { value: 0.70, margin: 0.03, source: "คาลิเบรตจากรูปตัวอย่าง 1,829 รูป (p10 ต่อหัวข้อ)" },
   // ค่ากราวด์ที่ไม่ใช่ตัวเลข (OL, N/A) — template บอกให้วัดจริง
   groundAllowNonNumeric: { value: false, source: "template 1.6" },
   // loss/km สำหรับ span ยาว: median 0.29, p95 0.42, max 0.66 จากตัวอย่าง 170 ค่า

@@ -3,7 +3,8 @@
 // 2) profiles: ไซต์ที่ไม่ตรงโปรไฟล์ใด → ROM ยืนยันว่าเอกสารถูกต้อง → บันทึกเป็นโปรไฟล์อ้างอิงใหม่ (L1, L2, …)
 // 3) refImages: รูปที่ ROM กด Accept → เป็นรูปตัวอย่างของ (โปรไฟล์ × section) แสดงเทียบข้างรูปใหม่ · รูปที่ Reject → จำ hash ไว้เตือน
 
-import { cloud, pushRow, deleteRow, pullAll, pushRefImage, deleteRefImage as cloudDeleteRef, downloadThumb } from "./cloud.js";
+import { cloud, pushRow, pushRows, deleteRow, pullAll, pushRefImage, deleteRefImage as cloudDeleteRef, downloadThumb } from "./cloud.js";
+import { decodeEmb } from "./embed.js";
 
 const KEY = "satp:kb";
 const DB = "satp-kb", STORE = "refimg";
@@ -125,7 +126,7 @@ export const topicOf = (section, topic) => (topic ? `${section} ${topic}` : sect
 export const listRefKeys = () => tx("readonly", (s) => s.getAllKeys()).then((r) => r || []);
 const sameImage = (keys, profile, hash) => keys.some((k) => k.startsWith(profile + "|") && k.endsWith("|" + hash));
 export const isReferenceSource = (src) => src === "signed" || src === "sample";
-export async function addRefImage({ profile, section, topic, site, page, thumb, hash, by, source = "rom" }, keys = null) {
+export async function addRefImage({ profile, section, topic, site, page, thumb, hash, by, source = "rom", emb = "" }, keys = null) {
   keys = keys || (await listRefKeys());
   const key = topicOf(section, topic);
   if (sameImage(keys, profile, hash)) return null;
@@ -133,7 +134,7 @@ export async function addRefImage({ profile, section, topic, site, page, thumb, 
     const same = (await listRefImages()).filter((x) => x.profile === profile && topicOf(x.section, x.topic) === key && (x.source || "rom") === "rom").sort((a, b) => (a.ts || 0) - (b.ts || 0));
     if (same.length >= MAX_ROM_REF) await tx("readwrite", (s) => s.delete(same[0].id));
   }
-  const rec = { id: `${profile}|${key}|${hash}`, profile, section, topic: topic || "", site, page, thumb, hash, by, source, at: new Date().toLocaleString("th-TH"), ts: Date.now() };
+  const rec = { id: `${profile}|${key}|${hash}`, profile, section, topic: topic || "", site, page, thumb, hash, by, source, emb, at: new Date().toLocaleString("th-TH"), ts: Date.now() };
   await tx("readwrite", (s) => s.put(rec));
   keys.push(rec.id);
   if (metaCache) metaCache.push({ id: rec.id, profile, site, source });
@@ -147,7 +148,47 @@ export async function refImagesForProfile(profile) { return tx("readonly", (s) =
 // ข้อมูลย่อของรูปอ้างอิง (ไม่รวมรูปย่อ) สำหรับสถิติ — cache ในหน่วยความจำ ล้างเมื่อมีการเพิ่ม/ลบ/ซิงก์
 let metaCache = null;
 export const invalidateRefMeta = () => { metaCache = null; };
-async function refMeta() { if (!metaCache) metaCache = (await listRefImages()).map((x) => ({ id: x.id, profile: x.profile, site: x.site, source: x.source })); return metaCache; }
+async function refMeta() { if (!metaCache) metaCache = (await listRefImages()).map((x) => ({ id: x.id, profile: x.profile, site: x.site, source: x.source, emb: !!x.emb })); return metaCache; }
+
+// ---------- ลายเซ็นภาพของรูปอ้างอิง (ไม่ต้องมีรูปย่อ) ----------
+// → [{id, profile, section, topic, site, page, hash, source, vec}] เฉพาะที่มี emb
+export async function refVectorsForProfile(profile) {
+  return (await refImagesForProfile(profile)).filter((x) => x.emb).map((x) => ({ id: x.id, profile: x.profile, section: x.section, topic: x.topic, site: x.site, page: x.page, hash: x.hash, source: x.source, thumb_path: x.thumb_path, vec: decodeEmb(x.emb) }));
+}
+export async function refThumb(id) {
+  const rec = await tx("readonly", (s) => s.get(id));
+  if (!rec) return null;
+  if (rec.thumb) return rec.thumb;
+  if (!rec.thumb_path || !cloud.ready) return null;
+  try { rec.thumb = await downloadThumb(rec.thumb_path); await tx("readwrite", (s) => s.put(rec)); return rec.thumb; } catch { return null; }
+}
+// เติมลายเซ็นภาพให้รูปอ้างอิงที่ยังไม่มี (ดาวน์โหลดรูปย่อถ้าจำเป็น) แล้วส่งขึ้นคลาวด์ — ใช้ครั้งแรกหลังเปิดฟีเจอร์เปรียบเทียบรูป
+export async function backfillEmbeddings(embedFn, encodeFn, onProgress = () => {}, profile = null) {
+  const all = (await listRefImages()).filter((x) => !x.emb && (!profile || x.profile === profile));
+  let done = 0, ok = 0, batch = [];
+  const flush = async () => { if (batch.length) { await pushRows("ref_images", batch); batch = []; } };
+  // ดาวน์โหลดรูปย่อล่วงหน้าแบบขนาน 4 รูป ระหว่างที่คำนวณลายเซ็นทีละรูป
+  const queue = all.slice(); const ready = [];
+  const fetcher = async () => { while (queue.length) { const rec = queue.shift(); try { if (!rec.thumb && rec.thumb_path && cloud.ready) rec.thumb = await downloadThumb(rec.thumb_path); } catch (e) { console.warn("thumb", rec.id, e?.message || e); } ready.push(rec); } };
+  const fetchers = Promise.all(Array.from({ length: 4 }, fetcher));
+  while (done < all.length) {
+    if (!ready.length) { await new Promise((r) => setTimeout(r, 50)); continue; }
+    const rec = ready.shift();
+    onProgress(`สร้างลายเซ็นภาพ ${++done}/${all.length}`);
+    try {
+      if (!rec.thumb) continue;
+      rec.emb = encodeFn(await embedFn(rec.thumb));
+      await tx("readwrite", (s) => s.put(rec));
+      const { thumb, ...meta } = rec;
+      batch.push({ key: rec.id, data: meta });
+      if (batch.length >= 40) await flush();
+      ok++;
+    } catch (e) { console.warn("embed", rec.id, e?.message || e); }
+  }
+  await fetchers; await flush();
+  metaCache = null;
+  return { total: all.length, ok };
+}
 
 // ---------- สถิติจำนวนรูปต่อ (โปรไฟล์ × หัวข้อ) จากไซต์ที่ลูกค้าเซ็นแล้ว ----------
 export function recordSectionCount(profile, section, topic, site, n) {
@@ -165,9 +206,9 @@ export function expectedCount(profile, section, topic) {
   return { median: ns[Math.floor(ns.length / 2)], min: ns[0], max: ns[ns.length - 1], sites: ns.length };
 }
 
-export function recordImageDecision({ hash, verdict, reason, site, section, by }) {
+export function recordImageDecision({ hash, verdict, reason, site, section, by, emb = "" }) {
   kb.imageDecisions = kb.imageDecisions.filter((d) => d.hash !== hash);
-  const d = { hash, verdict, reason: reason || "", site, section, by: by || "", at: new Date().toLocaleString("th-TH") };
+  const d = { hash, verdict, reason: reason || "", site, section, by: by || "", emb, at: new Date().toLocaleString("th-TH") };
   kb.imageDecisions.push(d);
   saveKb();
   pushRow("image_decisions", hash, d);
@@ -194,7 +235,7 @@ export async function importKb(json) {
 export async function kbStats() {
   const meta = await refMeta();
   const ref = meta.filter((x) => isReferenceSource(x.source));
-  return { decisions: kb.decisions.length, profiles: kb.profiles.length, imageDecisions: kb.imageDecisions.length, refImages: meta.length, signedRefs: ref.length, signedSites: new Set(ref.map((x) => x.site)).size };
+  return { decisions: kb.decisions.length, profiles: kb.profiles.length, imageDecisions: kb.imageDecisions.length, refImages: meta.length, withEmb: meta.filter((x) => x.emb).length, signedRefs: ref.length, signedSites: new Set(ref.map((x) => x.site)).size };
 }
 
 // ---------- ซิงก์กับฐานความรู้ร่วมของทีม (Supabase) ----------
@@ -218,6 +259,10 @@ export async function syncFromCloud(onProgress = () => {}) {
     n.refImages = todo.length;
     metaCache = null;
   }
+  // รูปที่มีในเครื่องแล้วแต่คลาวด์มีลายเซ็นภาพ (emb) ใหม่กว่า → อัปเดต
+  const localMeta = new Map((await refMeta()).map((x) => [x.id, x]));
+  const upd = c.ref_images.filter((r) => localKeys.has(r.key) && r.emb && !localMeta.get(r.key)?.emb);
+  if (upd.length) { await tx("readwrite", (s) => { for (const r of upd) { const req = s.get(r.key); req.onsuccess = () => { if (req.result) s.put({ ...req.result, emb: r.emb, thumb_path: r.thumb_path || req.result.thumb_path }); }; } return null; }); metaCache = null; }
   // รูปที่ถูกลบจากคลาวด์ (ROM ถอดออกจากเครื่องอื่น) → ลบในเครื่องด้วย
   const cloudKeys = new Set(c.ref_images.map((r) => r.key));
   const gone = [...localKeys].filter((k) => !cloudKeys.has(k));
