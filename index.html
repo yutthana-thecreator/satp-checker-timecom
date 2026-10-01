@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="th">
+<html lang="th" id="html-root">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,41 +10,41 @@
 <body>
 <header>
   <div class="wrap">
-    <h1>SATP Checker <span class="ver" id="ver"></span></h1>
+    <h1>SATP Checker <span class="ver" id="ver"></span> <span class="lang" id="lang-switch"><button type="button" class="btn small" data-lang="th">ไทย</button><button type="button" class="btn small" data-lang="en">EN</button></span></h1>
     <p class="proj">TIME.com Project — Nokia Field Service (AGRID 2.0 / DC2DC)</p>
-    <p class="sub">ตรวจเอกสาร SATP + Attachment Report ในเบราว์เซอร์ — ไฟล์ PDF ไม่ถูกส่งออกจากเครื่องนี้ (ขึ้นคลาวด์ของทีมเฉพาะสิ่งที่ระบบเรียนรู้)</p>
+    <p class="sub" data-i18n="sub">ตรวจเอกสาร SATP + Attachment Report ในเบราว์เซอร์ — ไฟล์ PDF ไม่ถูกส่งออกจากเครื่องนี้ (ขึ้นคลาวด์ของทีมเฉพาะสิ่งที่ระบบเรียนรู้)</p>
     <div id="cloud" class="cloud" hidden></div>
   </div>
 </header>
 
 <main class="wrap">
   <section class="card" id="sec-input">
-    <h2>1. โหลดไฟล์</h2>
+    <h2 data-i18n="h-load">1. โหลดไฟล์</h2>
     <div id="drop" class="drop" tabindex="0">
-      <p><strong>ลากไฟล์ PDF / zip / โฟลเดอร์มาวางที่นี่</strong> หรือ</p>
+      <p><strong data-i18n="drop-main">ลากไฟล์ PDF / zip / โฟลเดอร์มาวางที่นี่</strong> <span data-i18n="drop-or">หรือ</span></p>
       <p>
-        <label class="btn">เลือกไฟล์ <input type="file" id="file-pick" multiple accept=".pdf,.zip" hidden></label>
-        <label class="btn">เลือกโฟลเดอร์ <input type="file" id="dir-pick" webkitdirectory hidden></label>
+        <label class="btn"><span data-i18n="pick-files">เลือกไฟล์</span> <input type="file" id="file-pick" multiple accept=".pdf,.zip" hidden></label>
+        <label class="btn"><span data-i18n="pick-folder">เลือกโฟลเดอร์</span> <input type="file" id="dir-pick" webkitdirectory hidden></label>
       </p>
-      <p class="hint">ต่อไซต์ต้องมี SATP 1 ไฟล์ + Attachment Report 1 ไฟล์ (ชื่อไฟล์ตาม template TIME) — วางหลายไซต์พร้อมกันได้</p>
+      <p class="hint" data-i18n="drop-hint">ต่อไซต์ต้องมี SATP 1 ไฟล์ + Attachment Report 1 ไฟล์ (ชื่อไฟล์ตาม template TIME) — วางหลายไซต์พร้อมกันได้</p>
     </div>
     <div id="file-list" class="file-list"></div>
     <div class="row">
-      <button id="run" class="btn primary" disabled>ตรวจเอกสาร</button>
-      <button id="clear" class="btn">ล้าง</button>
-      <span class="hint">ตรวจเฉพาะเอกสารที่ subcon ส่งมาก่อน submit — ไฟล์ที่ลูกค้าเซ็น/มี Acceptance Date แล้วจะถือว่าผ่านทั้งหมด</span>
-      <button id="toggle-criteria" class="btn">เกณฑ์ตรวจ</button>
+      <button id="run" class="btn primary" disabled data-i18n="run">ตรวจเอกสาร</button>
+      <button id="clear" class="btn" data-i18n="clear">ล้าง</button>
+      <span class="hint" data-i18n="scope-hint">ตรวจเฉพาะเอกสารที่ subcon ส่งมาก่อน submit — ไฟล์ที่ลูกค้าเซ็น/มี Acceptance Date แล้วจะถือว่าผ่านทั้งหมด</span>
+      <button id="toggle-criteria" class="btn" data-i18n="criteria">เกณฑ์ตรวจ</button>
       <span id="progress" class="progress"></span>
     </div>
     <div id="criteria" class="criteria" hidden></div>
   </section>
 
   <section class="card" id="sec-results" hidden>
-    <h2>2. ผลตรวจ</h2>
+    <h2 data-i18n="h-results">2. ผลตรวจ</h2>
     <div class="row">
-      <button id="export" class="btn primary">ดาวน์โหลด Excel</button>
-      <button id="harvest" class="btn" title="ROM ยืนยันว่ารูปของทุกไซต์ในชุดนี้ถูกต้อง → ใช้เป็นรูปอ้างอิงเทียบกับไซต์ต่อไป">ใช้ทุกไซต์ในชุดนี้เป็นรูปอ้างอิง</button>
-      <label>ผู้ตรวจ <input id="reviewer" type="text" placeholder="ชื่อ" size="16"></label>
+      <button id="export" class="btn primary" data-i18n="export">ดาวน์โหลด Excel</button>
+      <button id="harvest" class="btn" data-i18n="harvest" data-i18n-title="harvest-title" title="ROM ยืนยันว่ารูปของทุกไซต์ในชุดนี้ถูกต้อง → ใช้เป็นรูปอ้างอิงเทียบกับไซต์ต่อไป">ใช้ทุกไซต์ในชุดนี้เป็นรูปอ้างอิง</button>
+      <label><span data-i18n="reviewer">ผู้ตรวจ</span> <input id="reviewer" type="text" placeholder="ชื่อ" data-i18n-placeholder="reviewer-ph" size="16"></label>
       <span id="run-meta" class="hint"></span>
     </div>
     <table id="summary" class="tbl"></table>
@@ -52,24 +52,24 @@
   </section>
 
   <section class="card">
-    <h2>ฐานความรู้ — การตัดสินใจของ ROM</h2>
+    <h2 data-i18n="h-kb">ฐานความรู้ — การตัดสินใจของ ROM</h2>
     <div id="kb"></div>
   </section>
 
   <section class="card" id="sec-history">
-    <h2>ประวัติการตรวจ (เก็บในเบราว์เซอร์นี้)</h2>
+    <h2 data-i18n="h-history">ประวัติการตรวจ (เก็บในเบราว์เซอร์นี้)</h2>
     <table id="history" class="tbl"></table>
     <div class="row">
-      <button id="clear-history" class="btn small">ล้างประวัติทั้งหมด</button>
-      <button id="clear-reviews" class="btn small">ล้างผลตรวจรูป (Accept/Reject) ทั้งหมด</button>
-      <button id="clear-all" class="btn small danger">ล้างข้อมูลทั้งหมดในเบราว์เซอร์นี้</button>
-      <span class="hint">ล้างเฉพาะเครื่องนี้ — ไม่กระทบเครื่องอื่นหรือไฟล์ที่ส่งออกไว้</span>
+      <button id="clear-history" class="btn small" data-i18n="clear-history">ล้างประวัติทั้งหมด</button>
+      <button id="clear-reviews" class="btn small" data-i18n="clear-reviews">ล้างผลตรวจรูป (Accept/Reject) ทั้งหมด</button>
+      <button id="clear-all" class="btn small danger" data-i18n="clear-all">ล้างข้อมูลทั้งหมดในเบราว์เซอร์นี้</button>
+      <span class="hint" data-i18n="clear-hint">ล้างเฉพาะเครื่องนี้ — ไม่กระทบเครื่องอื่นหรือไฟล์ที่ส่งออกไว้</span>
     </div>
   </section>
 </main>
 
 <footer class="wrap hint">
-  โปรไฟล์อ้างอิงและเกณฑ์เริ่มต้นสร้างจากเอกสารตัวอย่าง 46 ไซต์ (AGRID/DC2DC) · รายชื่อไซต์จาก Masterfile <span id="mf-date"></span> · ประวัติและผลตรวจรูปเก็บใน localStorage ของเครื่องนี้เท่านั้น
+  <span data-i18n="footer-1">โปรไฟล์อ้างอิงและเกณฑ์เริ่มต้นสร้างจากเอกสารตัวอย่าง 46 ไซต์ (AGRID/DC2DC) · รายชื่อไซต์จาก Masterfile</span> <span id="mf-date"></span> · <span data-i18n="footer-2">ประวัติและผลตรวจรูปเก็บใน localStorage ของเครื่องนี้เท่านั้น</span>
 </footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>

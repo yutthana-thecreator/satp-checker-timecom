@@ -1,5 +1,6 @@
 // OCR ในเบราว์เซอร์ด้วย Tesseract.js (โหลดโค้ด+ภาษาจาก CDN ครั้งแรก แล้ว cache) — รูปไม่ออกจากเครื่อง
 import { pageImageCanvases } from "./images.js";
+import { L } from "../i18n.js";
 
 const TESS_URL = "https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js";
 let workerPromise = null;
@@ -8,7 +9,7 @@ async function getWorker(onStatus) {
   if (workerPromise) return workerPromise;
   workerPromise = (async () => {
     if (!window.Tesseract) await new Promise((res, rej) => { const s = document.createElement("script"); s.src = TESS_URL; s.onload = res; s.onerror = rej; document.head.append(s); });
-    onStatus?.("กำลังโหลดโมเดล OCR (ครั้งแรกเท่านั้น)…");
+    onStatus?.(L("กำลังโหลดโมเดล OCR (ครั้งแรกเท่านั้น)…", "Loading OCR model (first time only)…"));
     const w = await window.Tesseract.createWorker("eng", 1, { logger: () => {} });
     await w.setParameters({ preserve_interword_spaces: "1" });
     return w;
@@ -55,7 +56,7 @@ export async function ocrSite(pdfjs, r, attBytes, satpBytes, onStatus, only = nu
     const labelPage = (A.captions?.b || [])[0]?.page;
     if (labelPage && !only) jobs.push({ doc, page: labelPage, bucket: "neLabel", onlyFirst: false });
     for (const j of jobs) {
-      onStatus?.(`OCR ${++done}/${jobs.length + 1}: Attachment หน้า ${j.page}`);
+      onStatus?.(L(`OCR ${++done}/${jobs.length + 1}: Attachment หน้า ${j.page}`, `OCR ${done}/${jobs.length + 1}: Attachment page ${j.page}`));
       const page = await j.doc.getPage(j.page);
       const imgs = await pageImageCanvases(page);
       for (const im of imgs) {

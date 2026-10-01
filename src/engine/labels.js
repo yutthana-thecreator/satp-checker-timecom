@@ -22,19 +22,20 @@
 // 26-27 DCPDB→PDU          RACK05/SPTIK_ILA2_501 · NOKIA POWER A1 (+) · AGRID 2.0
 // 28-30 เครื่องพิมพ์ป้าย   NIIMBOT D110 12.5×109 mm / Brother 12 mm · เหลือง/ดำ
 
+import { M } from "../i18n.js";
 export const LABEL_FORMAT_DOC = "TIME_AGRID2.0_DWDM_NOKIA_LABELLING FORMAT ON SITE Rev 0 (19/11/2025)";
 
 // สิ่งที่คาดว่าจะอ่านได้ในรูปแต่ละหัวข้อ (ใช้ตัดสินว่า "ไม่พบ" เป็นข้อผิดหรือแค่หมายเหตุ)
 // requireCode = ป้ายในหัวข้อนี้ต้องมีรหัสไซต์ชัดเจน (เป็นเนื้อหาหลักของรูป) → ไม่พบ = ต้องให้ ROM ดู
 export const TOPIC_RULES = {
-  "(a) Rack Installation": { requireCode: false, tokens: ["RACK", "LOOPBACK", "IP", "INSTALLATION"], desc: "ป้ายหน้าตู้: RACKnn_<ไซต์>_<ชนิด>-<เลข>, LOOPBACK IP, INSTALLATION DATE" },
-  "(b) NE ID Labeling": { requireCode: true, tokens: ["IP", "LOOPBACK", "LB"], desc: "ป้าย NE ID: <ไซต์>_<ชนิด>_<เลข> และ IP" },
-  "(c) Shelf View": { requireCode: false, tokens: ["SHELF"], desc: "ป้าย SHELF 01/02" },
-  "(d) Power Breaker Cabling and Tagging": { requireCode: false, tokens: ["POWER", "A1", "A2", "B1", "B2", "SH01", "SH02"], desc: "ป้ายสายไฟ: <ไซต์>_<ชนิด>_<เลข> SH01 A1/B1, NOKIA POWER A/B" },
-  "(e) Inter-Card and Inter-Shelf Cabling and Labeling": { requireCode: false, tokens: ["LINE_IN", "LINE_OUT", "LINE IN", "LINE OUT", "TX", "RX", "ES1", "ES2", "SH01", "SH02", "FR:"], desc: "ป้ายสาย: FR: <ไซต์>_<ชนิด>_<เลข> SHxx/SLyy/LINE_IN|OUT, TX:/RX: <ไซต์ปลายทาง>, SHxx_SLyy_ES1/ES2" },
-  "(f) Shelf and Rack Grounding": { requireCode: false, tokens: ["GND", "GROUND", "GROUNDING"], desc: "ป้ายกราวด์: <ไซต์>_<ชนิด>_<เลข> SHELF 01 GND/GROUND" },
-  "(g) ODF View": { requireCode: false, tokens: ["FDF", "ODF", "LINE_IN", "LINE_OUT", "RX", "TX"], desc: "ป้าย FDF: <ไซต์>_RACKnn_FDFnnn_Cnn_(RX|TX), <ไซต์>-<ปลายทาง>" },
-  "1.6 Ground": { requireCode: false, tokens: ["GND", "GROUND"], desc: "ป้ายกราวด์" },
+  "(a) Rack Installation": { requireCode: false, tokens: ["RACK", "LOOPBACK", "IP", "INSTALLATION"], desc: M("ป้ายหน้าตู้: RACKnn_<ไซต์>_<ชนิด>-<เลข>, LOOPBACK IP, INSTALLATION DATE", "rack label: RACKnn_<site>_<type>-<n>, LOOPBACK IP, INSTALLATION DATE") },
+  "(b) NE ID Labeling": { requireCode: true, tokens: ["IP", "LOOPBACK", "LB"], desc: M("ป้าย NE ID: <ไซต์>_<ชนิด>_<เลข> และ IP", "NE ID label: <site>_<type>_<n> and IP") },
+  "(c) Shelf View": { requireCode: false, tokens: ["SHELF"], desc: M("ป้าย SHELF 01/02", "SHELF 01/02 label") },
+  "(d) Power Breaker Cabling and Tagging": { requireCode: false, tokens: ["POWER", "A1", "A2", "B1", "B2", "SH01", "SH02"], desc: M("ป้ายสายไฟ: <ไซต์>_<ชนิด>_<เลข> SH01 A1/B1, NOKIA POWER A/B", "power cable label: <site>_<type>_<n> SH01 A1/B1, NOKIA POWER A/B") },
+  "(e) Inter-Card and Inter-Shelf Cabling and Labeling": { requireCode: false, tokens: ["LINE_IN", "LINE_OUT", "LINE IN", "LINE OUT", "TX", "RX", "ES1", "ES2", "SH01", "SH02", "FR:"], desc: M("ป้ายสาย: FR: <ไซต์>_<ชนิด>_<เลข> SHxx/SLyy/LINE_IN|OUT, TX:/RX: <ไซต์ปลายทาง>, SHxx_SLyy_ES1/ES2", "cable label: FR: <site>_<type>_<n> SHxx/SLyy/LINE_IN|OUT, TX:/RX: <far-end site>, SHxx_SLyy_ES1/ES2") },
+  "(f) Shelf and Rack Grounding": { requireCode: false, tokens: ["GND", "GROUND", "GROUNDING"], desc: M("ป้ายกราวด์: <ไซต์>_<ชนิด>_<เลข> SHELF 01 GND/GROUND", "grounding label: <site>_<type>_<n> SHELF 01 GND/GROUND") },
+  "(g) ODF View": { requireCode: false, tokens: ["FDF", "ODF", "LINE_IN", "LINE_OUT", "RX", "TX"], desc: M("ป้าย FDF: <ไซต์>_RACKnn_FDFnnn_Cnn_(RX|TX), <ไซต์>-<ปลายทาง>", "FDF label: <site>_RACKnn_FDFnnn_Cnn_(RX|TX), <site>-<far end>") },
+  "1.6 Ground": { requireCode: false, tokens: ["GND", "GROUND"], desc: M("ป้ายกราวด์", "grounding label") },
 };
 
 const norm = (s) => (s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -57,7 +58,7 @@ export function checkLabelText(topic, text, exp, fromLabels = true) {
   if (!rule) return out;
   const raw = (text || "").toUpperCase().replace(/TIME\s*[:：]\s*[A-Z0-9]{5}/g, " "); // ตัดบรรทัด "TIME:<ไซต์>" ของแอปกล้องออก
   const compact = raw.replace(/[^A-Z0-9]/g, "");
-  if (compact.length < 3) { out.notes.push("OCR อ่านตัวอักษรบนป้ายไม่ได้ (ตัวเล็กหรือไกล)"); if (rule.requireCode) out.flags.push(`ป้ายในรูปอ่านไม่ได้ — ต้องเห็นรหัสไซต์ ${exp.code5} ชัด (${rule.desc})`); return out; }
+  if (compact.length < 3) { out.notes.push(M("OCR อ่านตัวอักษรบนป้ายไม่ได้ (ตัวเล็กหรือไกล)", "OCR could not read the label text (too small or far)")); if (rule.requireCode) out.flags.push(M(`ป้ายในรูปอ่านไม่ได้ — ต้องเห็นรหัสไซต์ ${exp.code5} ชัด (${rule.desc.th})`, `Label unreadable — site code ${exp.code5} must be clearly visible (${rule.desc.en})`)); return out; }
 
   // รหัสไซต์ของตัวเอง (ยอมให้ OCR ผิด 1 ตัวอักษรใน 5)
   let best = 9;
@@ -72,9 +73,9 @@ export function checkLabelText(topic, text, exp, fromLabels = true) {
   const isNeighbour = (c) => exp.neighbours.some((n) => hamming5(c, n) <= 1);
   out.found.otherCodes = [...codes].filter((c) => !isSelf(c));
   for (const c of out.found.otherCodes) {
-    if (isNeighbour(c) && /\(e\)|\(g\)|Inter-Card|ODF/.test(topic)) out.notes.push(`ป้ายอ้างถึงไซต์ปลายทาง ${c} (ตรงตาราง Span Loss)`);
-    else if (isNeighbour(c)) out.notes.push(`ป้ายมีรหัสไซต์ปลายทาง ${c}`);
-    else out.flags.push(`ป้ายระบุไซต์ ${c} ไม่ใช่ ${exp.code5} และไม่ใช่ไซต์ปลายทาง — ป้ายผิดไซต์หรือรูปจากไซต์อื่น?`);
+    if (isNeighbour(c) && /\(e\)|\(g\)|Inter-Card|ODF/.test(topic)) out.notes.push(M(`ป้ายอ้างถึงไซต์ปลายทาง ${c} (ตรงตาราง Span Loss)`, `Label refers to far-end site ${c} (matches Span Loss table)`));
+    else if (isNeighbour(c)) out.notes.push(M(`ป้ายมีรหัสไซต์ปลายทาง ${c}`, `Label shows far-end site code ${c}`));
+    else out.flags.push(M(`ป้ายระบุไซต์ ${c} ไม่ใช่ ${exp.code5} และไม่ใช่ไซต์ปลายทาง — ป้ายผิดไซต์หรือรูปจากไซต์อื่น?`, `Label shows site ${c}, neither ${exp.code5} nor a far-end site — wrong label or photo from another site?`));
   }
 
   // IP บนป้าย vs หน้า 1
@@ -84,21 +85,22 @@ export function checkLabelText(topic, text, exp, fromLabels = true) {
     out.found.ip = got;
     const a = got.split("."), b = want.split(".");
     const diff = a.filter((x, i) => x !== b[i]).length;
-    if (diff === 0) out.notes.push(`IP บนป้าย ${got} ตรงหน้า 1`);
-    else if (diff === 1 && a[3] !== b[3]) out.flags.push(`IP บนป้าย ${got} ≠ หน้า 1 ${want}`);
-    else if (diff >= 2) out.flags.push(`IP บนป้าย ${got} ≠ หน้า 1 ${want}`);
-    else out.notes.push(`IP บนป้าย ${got} ใกล้เคียงหน้า 1 ${want} (OCR อาจอ่านผิด)`);
+    if (diff === 0) out.notes.push(M(`IP บนป้าย ${got} ตรงหน้า 1`, `IP on label ${got} matches page 1`));
+    else if (diff === 1 && a[3] !== b[3]) out.flags.push(M(`IP บนป้าย ${got} ≠ หน้า 1 ${want}`, `IP on label ${got} ≠ page 1 ${want}`));
+    else if (diff >= 2) out.flags.push(M(`IP บนป้าย ${got} ≠ หน้า 1 ${want}`, `IP on label ${got} ≠ page 1 ${want}`));
+    else out.notes.push(M(`IP บนป้าย ${got} ใกล้เคียงหน้า 1 ${want} (OCR อาจอ่านผิด)`, `IP on label ${got} close to page 1 ${want} (OCR may misread)`));
   }
 
   // คำสำคัญของหัวข้อ
   out.found.tokens = rule.tokens.filter((t) => raw.includes(t));
-  if (out.found.code && !fromLabels) { out.found.code = false; out.notes.push(`พบรหัสไซต์ ${exp.code5} ในรูป (ไม่พบป้ายสีเหลือง อาจเป็นข้อความอื่น)`); }
-  else if (out.found.code) out.notes.push(`ป้ายมีรหัสไซต์ ${exp.code5}`);
-  else if (rule.requireCode && fromLabels) out.flags.push(`OCR ไม่พบรหัสไซต์ ${exp.code5} บนป้าย (อ่านได้: "${raw.replace(/\s+/g, " ").trim().slice(0, 50)}") — ${rule.desc}`);
-  else if (rule.requireCode) out.flags.push(`ไม่พบป้ายสีเหลืองในรูป — ${rule.desc}`);
-  else if (!out.found.tokens.length) out.notes.push(`OCR ไม่พบรหัสไซต์หรือคำสำคัญของหัวข้อ (อ่านได้: "${raw.replace(/\s+/g, " ").trim().slice(0, 40)}")`);
-  if (/DC2DC/.test(raw) && exp.project === "AGRID") out.flags.push("ป้ายระบุโปรเจกต์ DC2DC แต่เอกสารเป็น AGRID");
-  if (/A-?GRID/.test(raw) && exp.project === "DC2DC") out.notes.push("ป้ายระบุ AGRID 2.0 (ไซต์ DC2DC ใช้ป้ายรูปแบบเดียวกัน)");
+  const read50 = raw.replace(/\s+/g, " ").trim().slice(0, 50), read40 = raw.replace(/\s+/g, " ").trim().slice(0, 40);
+  if (out.found.code && !fromLabels) { out.found.code = false; out.notes.push(M(`พบรหัสไซต์ ${exp.code5} ในรูป (ไม่พบป้ายสีเหลือง อาจเป็นข้อความอื่น)`, `Site code ${exp.code5} found in the photo (no yellow label detected, may be other text)`)); }
+  else if (out.found.code) out.notes.push(M(`ป้ายมีรหัสไซต์ ${exp.code5}`, `Label shows site code ${exp.code5}`));
+  else if (rule.requireCode && fromLabels) out.flags.push(M(`OCR ไม่พบรหัสไซต์ ${exp.code5} บนป้าย (อ่านได้: "${read50}") — ${rule.desc.th}`, `OCR did not find site code ${exp.code5} on the label (read: "${read50}") — ${rule.desc.en}`));
+  else if (rule.requireCode) out.flags.push(M(`ไม่พบป้ายสีเหลืองในรูป — ${rule.desc.th}`, `No yellow label found in the photo — ${rule.desc.en}`));
+  else if (!out.found.tokens.length) out.notes.push(M(`OCR ไม่พบรหัสไซต์หรือคำสำคัญของหัวข้อ (อ่านได้: "${read40}")`, `OCR found neither the site code nor the topic keywords (read: "${read40}")`));
+  if (/DC2DC/.test(raw) && exp.project === "AGRID") out.flags.push(M("ป้ายระบุโปรเจกต์ DC2DC แต่เอกสารเป็น AGRID", "Label says project DC2DC but the document is AGRID"));
+  if (/A-?GRID/.test(raw) && exp.project === "DC2DC") out.notes.push(M("ป้ายระบุ AGRID 2.0 (ไซต์ DC2DC ใช้ป้ายรูปแบบเดียวกัน)", "Label says AGRID 2.0 (DC2DC sites use the same label format)"));
   return out;
 }
 

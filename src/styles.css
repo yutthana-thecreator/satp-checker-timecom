@@ -9,6 +9,9 @@ body { margin: 0; font-family: "Segoe UI", Tahoma, "Noto Sans Thai", sans-serif;
 header { background: var(--blue); color: #fff; padding: 14px 0; }
 header h1 { margin: 0; font-size: 20px; }
 header .ver { font-size: 12px; opacity: .8; margin-left: 8px; }
+header .lang { margin-left: 12px; font-size: 12px; }
+header .lang .btn { padding: 1px 8px; font-size: 12px; background: transparent; color: #fff; border-color: #fff9; }
+header .lang .btn.active { background: #fff; color: var(--blue); }
 header .proj { margin: 2px 0 0; font-size: 13px; opacity: .85; }
 header .sub { margin: 4px 0 0; opacity: .9; }
 h2 { font-size: 16px; margin: 0 0 10px; }

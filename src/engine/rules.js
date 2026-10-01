@@ -5,6 +5,7 @@
 import { parseDate } from "./parse.js";
 import { DEFAULT_CRITERIA, matchProfile, powerSystem } from "./profiles.js";
 import { SITES } from "../data/sites.js";
+import { M, isPair } from "../i18n.js";
 
 const norm = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 const fmt = (n) => (n == null ? "-" : Number(n).toFixed(2));
@@ -31,13 +32,13 @@ export function nodeKind(f) {
 export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date()) {
   // site: { code, folder, satp: parsedSatp|null, att: parsedAtt|null, satpFile, attFile, pagesSatp, pagesAtt }
   const issues = [];
-  const add = (rule, level, severity, section, page, msg, who = "ระบบ") => issues.push({ rule, level, severity, section, page, msg, who });
+  const add = (rule, level, severity, section, page, msg, who = "ระบบ") => issues.push({ rule, level, severity, section, page, ...(isPair(msg) ? { msg: msg.th, msg_en: msg.en } : { msg }), who });
   const S = site.satp, A = site.att;
   const facts = { code: site.code };
 
   // ---------- R01 มีครบ 2 ไฟล์ และเป็นของไซต์เดียวกัน ----------
-  if (!S) add("R01", 1, "fail", "เอกสาร", null, "ไม่พบไฟล์ SATP");
-  if (!A) add("R01", 1, "fail", "เอกสาร", null, "ไม่พบไฟล์ Attachment Report");
+  if (!S) add("R01", 1, "fail", "เอกสาร", null, M("ไม่พบไฟล์ SATP", "SATP file not found"));
+  if (!A) add("R01", 1, "fail", "เอกสาร", null, M("ไม่พบไฟล์ Attachment Report", "Attachment Report file not found"));
   if (!S) return { issues, facts };
 
   const H = S.header;
@@ -47,31 +48,31 @@ export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date())
   facts.nodeType = H.neType || fileInfo.nodeType;
   facts.suffix = H.neSuffix || fileInfo.suffix;
   facts.project = /DC2DC/i.test(H.project) ? "DC2DC" : /AGRID/i.test(H.project) ? "AGRID" : fileInfo.project;
-  if (fileInfo.code && norm(fileInfo.code) !== code) add("R01", 2, "fail", "ชื่อไฟล์", 1, `ชื่อไฟล์ SATP ระบุไซต์ ${fileInfo.code} แต่ Station Name เป็น ${H.neCode}`);
-  if (A?.file?.code && norm(A.file.code) !== code) add("R01", 2, "fail", "ชื่อไฟล์", 1, `ไฟล์ Attachment เป็นของไซต์ ${A.file.code} ไม่ใช่ ${facts.code}`);
-  if (site.folderCode && norm(site.folderCode) !== code) add("R01", 2, "warn", "ชื่อไฟล์", 1, `โฟลเดอร์ ${site.folderCode} แต่เอกสารเป็นของไซต์ ${facts.code}`);
+  if (fileInfo.code && norm(fileInfo.code) !== code) add("R01", 2, "fail", "ชื่อไฟล์", 1, M(`ชื่อไฟล์ SATP ระบุไซต์ ${fileInfo.code} แต่ Station Name เป็น ${H.neCode}`, `SATP file name says site ${fileInfo.code} but Station Name is ${H.neCode}`));
+  if (A?.file?.code && norm(A.file.code) !== code) add("R01", 2, "fail", "ชื่อไฟล์", 1, M(`ไฟล์ Attachment เป็นของไซต์ ${A.file.code} ไม่ใช่ ${facts.code}`, `Attachment file belongs to site ${A.file.code}, not ${facts.code}`));
+  if (site.folderCode && norm(site.folderCode) !== code) add("R01", 2, "warn", "ชื่อไฟล์", 1, M(`โฟลเดอร์ ${site.folderCode} แต่เอกสารเป็นของไซต์ ${facts.code}`, `Folder ${site.folderCode} but the documents belong to site ${facts.code}`));
 
   // ---------- R02 จำนวนหน้า/section ----------
-  if (S.numPages !== 35) add("R02", 1, "fail", "SATP", null, `SATP มี ${S.numPages} หน้า (template 35 หน้า)`);
+  if (S.numPages !== 35) add("R02", 1, "fail", "SATP", null, M(`SATP มี ${S.numPages} หน้า (template 35 หน้า)`, `SATP has ${S.numPages} pages (template: 35)`));
   for (const [k, label, pg] of [["power", "1.5 Power Supply", S.power], ["ground", "1.6 Ground", S.ground], ["software", "1.7 Equipment Config", S.software], ["neSetup", "1.9 NE Setup", S.neSetup], ["discovery", "1.10 Discovery", S.discovery]])
-    if (!S[k]) add("R02", 1, "fail", label, null, `ไม่พบ section ${label}`);
-  if (!S.span.length) add("R02", 1, "fail", "1.11 Span Loss", null, "ไม่พบตาราง Span Loss หรืออ่านไม่ได้");
-  if (!S.tx.length) add("R02", 1, "fail", "1.12 TX", null, "ไม่พบตาราง TX Power");
-  if (!S.rx.length) add("R02", 1, "fail", "1.13 RX", null, "ไม่พบตาราง RX Power");
-  if (!S.visual.length) add("R02", 1, "fail", "1.8 Visual", null, "ไม่พบตาราง Visual Inspection");
+    if (!S[k]) add("R02", 1, "fail", label, null, M(`ไม่พบ section ${label}`, `Section ${label} not found`));
+  if (!S.span.length) add("R02", 1, "fail", "1.11 Span Loss", null, M("ไม่พบตาราง Span Loss หรืออ่านไม่ได้", "Span Loss table missing or unreadable"));
+  if (!S.tx.length) add("R02", 1, "fail", "1.12 TX", null, M("ไม่พบตาราง TX Power", "TX Power table not found"));
+  if (!S.rx.length) add("R02", 1, "fail", "1.13 RX", null, M("ไม่พบตาราง RX Power", "RX Power table not found"));
+  if (!S.visual.length) add("R02", 1, "fail", "1.8 Visual", null, M("ไม่พบตาราง Visual Inspection", "Visual Inspection table not found"));
 
   // ---------- R03 หน้า 1 ----------
   for (const [f, label] of [["station", "Station Name"], ["ip", "IP Address"], ["model", "DWDM Model"], ["installStart", "Installation Start"], ["installEnd", "Installation End"]])
-    if (!H[f]) add("R03", 1, "fail", "SATP หน้า 1", 1, `ไม่ได้กรอก ${label}`);
+    if (!H[f]) add("R03", 1, "fail", "SATP หน้า 1", 1, M(`ไม่ได้กรอก ${label}`, `${label} not filled in`));
   // ขั้น "ก่อนส่งลูกค้า": Acceptance Date และลายเซ็น TIME ยังไม่ต้องมี → รายงานเป็นข้อมูล
   // ระบบตรวจเฉพาะเอกสารที่ subcon ส่งมาก่อน submit — Acceptance Date/ลายเซ็นลูกค้าไม่ใช่เงื่อนไข
   // ถ้าลูกค้าเซ็น/กรอก Acceptance Date มาแล้ว = ผ่านการ acceptance แล้ว ไม่ต้องตรวจซ้ำ (ตัดสินท้ายฟังก์ชัน)
   facts.customerAccepted = !!H.acceptanceDate || !!(fileInfo.signed || A?.file?.signed);
-  if (S.checklist && S.checklist.ticks < 5) add("R03", 1, "fail", "1.2 Checklist", S.checklist.page, `Checklist ติ๊ก ${S.checklist.ticks}/5 ข้อ`);
+  if (S.checklist && S.checklist.ticks < 5) add("R03", 1, "fail", "1.2 Checklist", S.checklist.page, M(`Checklist ติ๊ก ${S.checklist.ticks}/5 ข้อ`, `Checklist ticked ${S.checklist.ticks}/5 items`));
 
   // ---------- R04 Block diagram ----------
-  if (!S.blockDiagram) add("R04", 1, "fail", "1.1 Block Diagram", 5, "ไม่พบหน้า Block Diagram");
-  else if (S.blockDiagram.photoCount === 0) add("R04", 1, "fail", "1.1 Block Diagram", S.blockDiagram.no, "หน้า Block Diagram ไม่มีรูป");
+  if (!S.blockDiagram) add("R04", 1, "fail", "1.1 Block Diagram", 5, M("ไม่พบหน้า Block Diagram", "Block Diagram page not found"));
+  else if (S.blockDiagram.photoCount === 0) add("R04", 1, "fail", "1.1 Block Diagram", S.blockDiagram.no, M("หน้า Block Diagram ไม่มีรูป", "Block Diagram page has no picture"));
 
   // ---------- R05 ลายเซ็น/วันที่ ----------
   const signPages = S.pageDates.filter((d) => d.page >= 6 && d.page <= 27);
@@ -80,8 +81,8 @@ export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date())
   facts.signatureDates = withDate;
 
   // ---------- R06 placeholder ----------
-  if (S.placeholders.length) add("R06", 1, "fail", "SATP", S.placeholders[0], `มีข้อความ template ค้าง 'Type text here' หน้า ${S.placeholders.join(", ")}`);
-  if (A?.placeholders?.length) add("R06", 1, "fail", "Attachment", A.placeholders[0], `มีข้อความ template ค้าง 'Type text here' หน้า ${A.placeholders.join(", ")}`);
+  if (S.placeholders.length) add("R06", 1, "fail", "SATP", S.placeholders[0], M(`มีข้อความ template ค้าง 'Type text here' หน้า ${S.placeholders.join(", ")}`, `Template placeholder 'Type text here' left on page ${S.placeholders.join(", ")}`));
+  if (A?.placeholders?.length) add("R06", 1, "fail", "Attachment", A.placeholders[0], M(`มีข้อความ template ค้าง 'Type text here' หน้า ${A.placeholders.join(", ")}`, `Template placeholder 'Type text here' left on page ${A.placeholders.join(", ")}`));
 
   // ---------- facts: degrees, modules, power, shelves ----------
   const spans = S.span;
@@ -106,22 +107,22 @@ export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date())
   facts.profileName = pm.profile ? pm.profile.name : null;
   facts.nearestProfile = pm.nearest?.id || null;
   facts.profileMismatches = pm.mismatches;
-  if (!pm.profile) add("P00", 0, "info", "โปรไฟล์", null, `ไม่ตรงโปรไฟล์อ้างอิงใด (ใกล้ ${pm.nearest?.id}: ${pm.mismatches.join("; ")}) → ใช้กฎทั่วไป, ROM ตรวจเอง`, "ROM");
-  else add("P00", 0, "info", "โปรไฟล์", null, `เทียบกับโปรไฟล์ ${pm.profile.id} (${pm.profile.name}) ตัวอย่าง ${pm.profile.samples} ไซต์`);
-  if (facts.nodeType === "EILA") add("P00", 0, "info", "โปรไฟล์", null, "EILA — ยังไม่มีตัวอย่าง ตรวจเฉพาะกฎทั่วไป", "ROM");
+  if (!pm.profile) add("P00", 0, "info", "โปรไฟล์", null, M(`ไม่ตรงโปรไฟล์อ้างอิงใด (ใกล้ ${pm.nearest?.id}: ${pm.mismatches.join("; ")}) → ใช้กฎทั่วไป, ROM ตรวจเอง`, `Matches no reference profile (nearest ${pm.nearest?.id}: ${pm.mismatches.join("; ")}) → general rules only, ROM reviews`), "ROM");
+  else add("P00", 0, "info", "โปรไฟล์", null, M(`เทียบกับโปรไฟล์ ${pm.profile.id} (${pm.profile.name}) ตัวอย่าง ${pm.profile.samples} ไซต์`, `Compared with profile ${pm.profile.id} (${pm.profile.name}), ${pm.profile.samples} sample sites`));
+  if (facts.nodeType === "EILA") add("P00", 0, "info", "โปรไฟล์", null, M("EILA — ยังไม่มีตัวอย่าง ตรวจเฉพาะกฎทั่วไป", "EILA — no samples yet, general rules only"), "ROM");
 
   // ---------- R07 Attachment รูปครบ ----------
   if (A) {
     const need = ["1.4", "1.5", "1.6", "1.8", "1.9", "1.15"];
-    for (const s of need) if (!A.sections[s]) add("R07", 1, "fail", `Attachment ${s}`, null, `ไม่พบ section ${s} ใน Attachment`);
+    for (const s of need) if (!A.sections[s]) add("R07", 1, "fail", `Attachment ${s}`, null, M(`ไม่พบ section ${s} ใน Attachment`, `Section ${s} not found in Attachment`));
     const caps = ["a", "b", "c", "d", "e", "f", "g"];
-    for (const c of caps) if (!A.captions[c]) add("R07", 1, "fail", "Attachment 1.8", A.sections["1.8"], `ไม่พบรูปหัวข้อ 1.8 (${c})`);
+    for (const c of caps) if (!A.captions[c]) add("R07", 1, "fail", "Attachment 1.8", A.sections["1.8"], M(`ไม่พบรูปหัวข้อ 1.8 (${c})`, `Photo for 1.8 (${c}) not found`));
     const shelfCount = Object.values(facts.shelves || {}).reduce((a, b) => a + b, 0);
     const shelfViews = (A.captions.c || []).filter((x) => /Shelf View/i.test(x.label)).length;
     const remarks = new Set(A.shelfRemarks.map((r) => +r.shelf)).size;
-    if (shelfCount >= 2 && remarks < shelfCount) add("R07", 1, "warn", "Attachment 1.8 (c)/(f)", A.sections["1.8"], `ต้องมี remark Shelf # ครบ ${shelfCount} shelf แต่พบ ${remarks}`, "คนตรวจ");
+    if (shelfCount >= 2 && remarks < shelfCount) add("R07", 1, "warn", "Attachment 1.8 (c)/(f)", A.sections["1.8"], M(`ต้องมี remark Shelf # ครบ ${shelfCount} shelf แต่พบ ${remarks}`, `Shelf # remark required for all ${shelfCount} shelves, found ${remarks}`), "คนตรวจ");
     const fsNeed = facts.degrees * 2;
-    if (A.fiberScope.length < fsNeed) add("R07", 1, "fail", "Attachment 1.15", A.sections["1.15"], `Fiber scope มี ${A.fiberScope.length} รูป ต้องมีอย่างน้อย ${fsNeed} (Line In/Out × ${facts.degrees} ทิศ)`);
+    if (A.fiberScope.length < fsNeed) add("R07", 1, "fail", "Attachment 1.15", A.sections["1.15"], M(`Fiber scope มี ${A.fiberScope.length} รูป ต้องมีอย่างน้อย ${fsNeed} (Line In/Out × ${facts.degrees} ทิศ)`, `Fiber scope has ${A.fiberScope.length} images, needs at least ${fsNeed} (Line In/Out × ${facts.degrees} directions)`));
     // photo counts per section from page list
     if (site.pagesAtt) {
       const secPages = Object.entries(A.sections).sort((a, b) => a[1] - b[1]);
@@ -129,7 +130,7 @@ export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date())
         const [sec, from] = secPages[i];
         const to = i + 1 < secPages.length ? secPages[i + 1][1] - 1 : site.pagesAtt.length;
         const photos = site.pagesAtt.slice(from - 1, to).reduce((n, p) => n + (p.photoCount || 0), 0);
-        if (photos === 0) add("R07", 1, "fail", `Attachment ${sec}`, from, `section ${sec} ไม่มีรูปแนบ`);
+        if (photos === 0) add("R07", 1, "fail", `Attachment ${sec}`, from, M(`section ${sec} ไม่มีรูปแนบ`, `Section ${sec} has no attached photo`));
       }
     }
   }
@@ -137,39 +138,39 @@ export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date())
   // ---------- R08 SATP vs ATT หน้า 1 ----------
   if (A) {
     const AH = A.header;
-    if (norm(AH.station) !== norm(H.station)) add("R08", 2, "fail", "ATT หน้า 1", 1, `Station Name ไม่ตรง: SATP '${H.station}' vs ATT '${AH.station}'`);
-    if (norm(AH.model).replace(/^1830/, "") !== norm(H.model).replace(/^1830/, "")) add("R08", 2, "fail", "ATT หน้า 1", 1, `DWDM Model ไม่ตรง: SATP '${H.model}' vs ATT '${AH.model}'`);
-    if (AH.ip && H.ip && AH.ip !== H.ip) add("R08", 2, "fail", "ATT หน้า 1", 1, `IP ไม่ตรง: SATP ${H.ip} vs ATT ${AH.ip}`);
-    if (AH.installStart && H.installStart && AH.installStart !== H.installStart) add("R08", 2, "warn", "ATT หน้า 1", 1, `วันติดตั้งไม่ตรง: SATP ${H.installStart} vs ATT ${AH.installStart}`);
-    if (A.file?.nodeType && S.file?.nodeType && (A.file.nodeType !== S.file.nodeType || A.file.suffix !== S.file.suffix)) add("R08", 2, "fail", "ชื่อไฟล์", 1, `ประเภทในชื่อไฟล์ไม่ตรง: SATP ${S.file.nodeType}_${S.file.suffix} vs ATT ${A.file.nodeType}_${A.file.suffix}`);
+    if (norm(AH.station) !== norm(H.station)) add("R08", 2, "fail", "ATT หน้า 1", 1, M(`Station Name ไม่ตรง: SATP '${H.station}' vs ATT '${AH.station}'`, `Station Name mismatch: SATP '${H.station}' vs ATT '${AH.station}'`));
+    if (norm(AH.model).replace(/^1830/, "") !== norm(H.model).replace(/^1830/, "")) add("R08", 2, "fail", "ATT หน้า 1", 1, M(`DWDM Model ไม่ตรง: SATP '${H.model}' vs ATT '${AH.model}'`, `DWDM Model mismatch: SATP '${H.model}' vs ATT '${AH.model}'`));
+    if (AH.ip && H.ip && AH.ip !== H.ip) add("R08", 2, "fail", "ATT หน้า 1", 1, M(`IP ไม่ตรง: SATP ${H.ip} vs ATT ${AH.ip}`, `IP mismatch: SATP ${H.ip} vs ATT ${AH.ip}`));
+    if (AH.installStart && H.installStart && AH.installStart !== H.installStart) add("R08", 2, "warn", "ATT หน้า 1", 1, M(`วันติดตั้งไม่ตรง: SATP ${H.installStart} vs ATT ${AH.installStart}`, `Installation date mismatch: SATP ${H.installStart} vs ATT ${AH.installStart}`));
+    if (A.file?.nodeType && S.file?.nodeType && (A.file.nodeType !== S.file.nodeType || A.file.suffix !== S.file.suffix)) add("R08", 2, "fail", "ชื่อไฟล์", 1, M(`ประเภทในชื่อไฟล์ไม่ตรง: SATP ${S.file.nodeType}_${S.file.suffix} vs ATT ${A.file.nodeType}_${A.file.suffix}`, `Type in file names differs: SATP ${S.file.nodeType}_${S.file.suffix} vs ATT ${A.file.nodeType}_${A.file.suffix}`));
   }
-  if (fileInfo.nodeType && facts.nodeType && (fileInfo.nodeType !== facts.nodeType || fileInfo.suffix !== facts.suffix)) add("R08", 2, "fail", "SATP หน้า 1", 1, `ประเภทใน Station Name (${facts.nodeType}_${facts.suffix}) ≠ ชื่อไฟล์ (${fileInfo.nodeType}_${fileInfo.suffix})`);
+  if (fileInfo.nodeType && facts.nodeType && (fileInfo.nodeType !== facts.nodeType || fileInfo.suffix !== facts.suffix)) add("R08", 2, "fail", "SATP หน้า 1", 1, M(`ประเภทใน Station Name (${facts.nodeType}_${facts.suffix}) ≠ ชื่อไฟล์ (${fileInfo.nodeType}_${fileInfo.suffix})`, `Type in Station Name (${facts.nodeType}_${facts.suffix}) ≠ file name (${fileInfo.nodeType}_${fileInfo.suffix})`));
 
   // ---------- R09 model ตรงประเภท ----------
   const model = norm(H.model);
-  if (/ILA/.test(facts.nodeType) && !/PSS8/.test(model)) add("R09", 2, "fail", "SATP หน้า 1", 1, `ILA ควรเป็น 1830 PSS-8 แต่ระบุ '${H.model}'`);
-  if (facts.nodeType === "RDM" && !/PSI8L/.test(model)) add("R09", 2, "fail", "SATP หน้า 1", 1, `ROADM ควรเป็น 1830 PSI-8L แต่ระบุ '${H.model}'`);
+  if (/ILA/.test(facts.nodeType) && !/PSS8/.test(model)) add("R09", 2, "fail", "SATP หน้า 1", 1, M(`ILA ควรเป็น 1830 PSS-8 แต่ระบุ '${H.model}'`, `ILA should be 1830 PSS-8 but document says '${H.model}'`));
+  if (facts.nodeType === "RDM" && !/PSI8L/.test(model)) add("R09", 2, "fail", "SATP หน้า 1", 1, M(`ROADM ควรเป็น 1830 PSI-8L แต่ระบุ '${H.model}'`, `ROADM should be 1830 PSI-8L but document says '${H.model}'`));
   if (siteRef) {
     const want = Object.keys(siteRef.shelves);
     const have = /PSI8L/.test(model) ? "PSI-8L" : /PSS8/.test(model) ? "PSS-8" : H.model;
-    if (!want.includes(have)) add("R09", 2, "fail", "SATP หน้า 1", 1, `Model '${H.model}' ไม่ตรงรายชื่อไซต์ (${siteRef.shelfType})`);
+    if (!want.includes(have)) add("R09", 2, "fail", "SATP หน้า 1", 1, M(`Model '${H.model}' ไม่ตรงรายชื่อไซต์ (${siteRef.shelfType})`, `Model '${H.model}' does not match the site list (${siteRef.shelfType})`));
   }
 
   // ---------- R10 Station Name มีรหัสไซต์ / ตรงรายชื่อไซต์ ----------
-  if (!H.neCode) add("R10", 2, "fail", "SATP หน้า 1", 1, `อ่านรหัสไซต์จาก Station Name ไม่ได้: '${H.station}'`);
-  if (site.folderCode && H.neCode && norm(H.neCode) !== norm(site.folderCode)) add("R10", 2, "fail", "SATP หน้า 1", 1, `Station Name ระบุ ${H.neCode} แต่โฟลเดอร์/ชื่อไฟล์เป็น ${site.folderCode} (พิมพ์ผิด?)`);
+  if (!H.neCode) add("R10", 2, "fail", "SATP หน้า 1", 1, M(`อ่านรหัสไซต์จาก Station Name ไม่ได้: '${H.station}'`, `Cannot read site code from Station Name: '${H.station}'`));
+  if (site.folderCode && H.neCode && norm(H.neCode) !== norm(site.folderCode)) add("R10", 2, "fail", "SATP หน้า 1", 1, M(`Station Name ระบุ ${H.neCode} แต่โฟลเดอร์/ชื่อไฟล์เป็น ${site.folderCode} (พิมพ์ผิด?)`, `Station Name says ${H.neCode} but folder/file name is ${site.folderCode} (typo?)`));
   if (siteRef) {
-    if (siteRef.nodeType !== facts.nodeType || siteRef.suffix !== facts.suffix) add("R10", 2, "fail", "SATP หน้า 1", 1, `รายชื่อไซต์ระบุ ${siteRef.neName} แต่เอกสารเป็น ${facts.nodeType}_${facts.suffix}`);
-    if (S.neSetup?.loopback && H.ip && S.neSetup.loopback !== H.ip) add("R10", 2, "fail", "1.9 NE Setup", S.neSetup.page, `Loopback IP ${S.neSetup.loopback} ≠ IP หน้า 1 ${H.ip}`);
-  } else if (S.neSetup?.loopback && H.ip && S.neSetup.loopback !== H.ip) add("R10", 2, "fail", "1.9 NE Setup", S.neSetup.page, `Loopback IP ${S.neSetup.loopback} ≠ IP หน้า 1 ${H.ip}`);
-  if (!siteRef) add("R10", 2, "info", "รายชื่อไซต์", 1, `ไซต์ ${facts.code} ไม่อยู่ในรายชื่อ 56 ไซต์ของโปรเจกต์ไทย (ตัวอย่าง/ไซต์นอกรายการ)`);
+    if (siteRef.nodeType !== facts.nodeType || siteRef.suffix !== facts.suffix) add("R10", 2, "fail", "SATP หน้า 1", 1, M(`รายชื่อไซต์ระบุ ${siteRef.neName} แต่เอกสารเป็น ${facts.nodeType}_${facts.suffix}`, `Site list says ${siteRef.neName} but the document is ${facts.nodeType}_${facts.suffix}`));
+    if (S.neSetup?.loopback && H.ip && S.neSetup.loopback !== H.ip) add("R10", 2, "fail", "1.9 NE Setup", S.neSetup.page, M(`Loopback IP ${S.neSetup.loopback} ≠ IP หน้า 1 ${H.ip}`, `Loopback IP ${S.neSetup.loopback} ≠ page 1 IP ${H.ip}`));
+  } else if (S.neSetup?.loopback && H.ip && S.neSetup.loopback !== H.ip) add("R10", 2, "fail", "1.9 NE Setup", S.neSetup.page, M(`Loopback IP ${S.neSetup.loopback} ≠ IP หน้า 1 ${H.ip}`, `Loopback IP ${S.neSetup.loopback} ≠ page 1 IP ${H.ip}`));
+  if (!siteRef) add("R10", 2, "info", "รายชื่อไซต์", 1, M(`ไซต์ ${facts.code} ไม่อยู่ในรายชื่อ 56 ไซต์ของโปรเจกต์ไทย (ตัวอย่าง/ไซต์นอกรายการ)`, `Site ${facts.code} is not in the 56-site Thai project list (sample / out-of-list site)`));
 
   // ---------- R11 วันที่ ----------
   const ds = parseDate(H.installStart), de = parseDate(H.installEnd);
-  if (H.installStart && !ds) add("R11", 2, "fail", "SATP หน้า 1", 1, `วันที่ติดตั้ง Start รูปแบบผิด: '${H.installStart}'`);
-  if (H.installEnd && !de) add("R11", 2, "fail", "SATP หน้า 1", 1, `วันที่ติดตั้ง End รูปแบบผิด: '${H.installEnd}'`);
-  if (ds && de && de < ds) add("R11", 2, "fail", "SATP หน้า 1", 1, `End (${H.installEnd}) ก่อน Start (${H.installStart})`);
-  if (ds && ds > today) add("R11", 2, "fail", "SATP หน้า 1", 1, `วันที่ติดตั้งอยู่ในอนาคต: ${H.installStart}`);
+  if (H.installStart && !ds) add("R11", 2, "fail", "SATP หน้า 1", 1, M(`วันที่ติดตั้ง Start รูปแบบผิด: '${H.installStart}'`, `Installation Start date format invalid: '${H.installStart}'`));
+  if (H.installEnd && !de) add("R11", 2, "fail", "SATP หน้า 1", 1, M(`วันที่ติดตั้ง End รูปแบบผิด: '${H.installEnd}'`, `Installation End date format invalid: '${H.installEnd}'`));
+  if (ds && de && de < ds) add("R11", 2, "fail", "SATP หน้า 1", 1, M(`End (${H.installEnd}) ก่อน Start (${H.installStart})`, `End (${H.installEnd}) is before Start (${H.installStart})`));
+  if (ds && ds > today) add("R11", 2, "fail", "SATP หน้า 1", 1, M(`วันที่ติดตั้งอยู่ในอนาคต: ${H.installStart}`, `Installation date is in the future: ${H.installStart}`));
 
 
   // ---------- R12 / R13 span consistency ----------
@@ -178,28 +179,28 @@ export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date())
   for (let i = 0; i + 1 < spans.length; i += 2) {
     const a = spans[i], b = spans[i + 1];
     const pa = [norm(a.siteA), norm(a.siteB)].sort(), pb = [norm(b.siteA), norm(b.siteB)].sort();
-    if (pa.join() !== pb.join()) add("R12", 2, "fail", "1.11 Span", a.page, `core1/core2 คู่ไซต์ไม่ตรงกัน: ${a.siteA}-${a.siteB} vs ${b.siteA}-${b.siteB} (พิมพ์รหัสไซต์ผิด?)`);
-    if (a.distance !== b.distance) add("R12", 2, "fail", "1.11 Span", a.page, `core1/core2 ระยะไม่เท่ากัน: ${a.distance} vs ${b.distance} km`);
+    if (pa.join() !== pb.join()) add("R12", 2, "fail", "1.11 Span", a.page, M(`core1/core2 คู่ไซต์ไม่ตรงกัน: ${a.siteA}-${a.siteB} vs ${b.siteA}-${b.siteB} (พิมพ์รหัสไซต์ผิด?)`, `core1/core2 site pairs differ: ${a.siteA}-${a.siteB} vs ${b.siteA}-${b.siteB} (site code typo?)`));
+    if (a.distance !== b.distance) add("R12", 2, "fail", "1.11 Span", a.page, M(`core1/core2 ระยะไม่เท่ากัน: ${a.distance} vs ${b.distance} km`, `core1/core2 distances differ: ${a.distance} vs ${b.distance} km`));
     spanPairs.push({ a, b, far: pa.find((x) => !x.startsWith(self.slice(0, 4))) || pa[0] });
   }
-  if (spans.length % 2) add("R12", 2, "warn", "1.11 Span", spans[0].page, `จำนวนแถว Span เป็นเลขคี่ (${spans.length}) — ควรมี core1+core2 ต่อทิศ`);
+  if (spans.length % 2) add("R12", 2, "warn", "1.11 Span", spans[0].page, M(`จำนวนแถว Span เป็นเลขคี่ (${spans.length}) — ควรมี core1+core2 ต่อทิศ`, `Odd number of Span rows (${spans.length}) — expected core1+core2 per direction`));
   for (const r of spans) {
     const hasSelf = [norm(r.siteA), norm(r.siteB)].some((x) => x.startsWith(self.slice(0, 4)) || self.startsWith(x.slice(0, 4)));
-    if (!hasSelf) add("R12", 2, "fail", "1.11 Span", r.page, `แถว core${r.core} ${r.siteA}-${r.siteB} ไม่มีไซต์ตัวเอง (${facts.code})`);
-    if (r.dirA === r.dirB) add("R13", 2, "fail", "1.11 Span", r.page, `core${r.core} ${r.siteA}-${r.siteB}: ทั้งสองฝั่งเป็น ${r.dirA} (ต้อง TX คู่ RX)`);
+    if (!hasSelf) add("R12", 2, "fail", "1.11 Span", r.page, M(`แถว core${r.core} ${r.siteA}-${r.siteB} ไม่มีไซต์ตัวเอง (${facts.code})`, `Row core${r.core} ${r.siteA}-${r.siteB} does not include this site (${facts.code})`));
+    if (r.dirA === r.dirB) add("R13", 2, "fail", "1.11 Span", r.page, M(`core${r.core} ${r.siteA}-${r.siteB}: ทั้งสองฝั่งเป็น ${r.dirA} (ต้อง TX คู่ RX)`, `core${r.core} ${r.siteA}-${r.siteB}: both ends are ${r.dirA} (must be TX with RX)`));
   }
-  if (/ILA/.test(facts.nodeType) && facts.degrees !== 2 && spans.length) add("R12", 1, "fail", "1.11 Span", spans[0].page, `ILA ต้องมี 2 ทิศ (4 แถว) แต่มี ${facts.degrees} ทิศ (${spans.length} แถว)`);
+  if (/ILA/.test(facts.nodeType) && facts.degrees !== 2 && spans.length) add("R12", 1, "fail", "1.11 Span", spans[0].page, M(`ILA ต้องมี 2 ทิศ (4 แถว) แต่มี ${facts.degrees} ทิศ (${spans.length} แถว)`, `ILA must have 2 directions (4 rows) but has ${facts.degrees} (${spans.length} rows)`));
 
   // ---------- R15 TX/RX rows vs degrees, slot ซ้ำ ----------
   for (const [sec, rows] of [["1.12 TX", S.tx], ["1.13 RX", S.rx]]) {
     const slots = rows.map((r) => r.slot);
     const dup = [...new Set(slots.filter((s, i) => slots.indexOf(s) !== i))];
-    if (dup.length) add("R15", 2, "fail", sec, rows[0].page, `Slot ซ้ำ: ${dup.join(", ")}`);
-    if (rows.length && facts.degrees && rows.length !== facts.degrees) add("R15", 2, "fail", sec, rows[0].page, `จำนวนแถว ${rows.length} ≠ จำนวนทิศ ${facts.degrees}`);
+    if (dup.length) add("R15", 2, "fail", sec, rows[0].page, M(`Slot ซ้ำ: ${dup.join(", ")}`, `Duplicate slot: ${dup.join(", ")}`));
+    if (rows.length && facts.degrees && rows.length !== facts.degrees) add("R15", 2, "fail", sec, rows[0].page, M(`จำนวนแถว ${rows.length} ≠ จำนวนทิศ ${facts.degrees}`, `${rows.length} rows ≠ ${facts.degrees} directions`));
   }
   if (S.tx.length && S.rx.length) {
     const ts = S.tx.map((r) => r.slot).sort().join(), rs = S.rx.map((r) => r.slot).sort().join();
-    if (ts !== rs) add("R15", 2, "fail", "1.12/1.13", S.rx[0].page, `Slot ใน TX (${S.tx.map((r) => r.slot).join(", ")}) ≠ RX (${S.rx.map((r) => r.slot).join(", ")})`);
+    if (ts !== rs) add("R15", 2, "fail", "1.12/1.13", S.rx[0].page, M(`Slot ใน TX (${S.tx.map((r) => r.slot).join(", ")}) ≠ RX (${S.rx.map((r) => r.slot).join(", ")})`, `Slots in TX (${S.tx.map((r) => r.slot).join(", ")}) ≠ RX (${S.rx.map((r) => r.slot).join(", ")})`));
   }
 
   // ---------- R16 ค่า TX/RX ตรงกับ 1.11 ----------
@@ -208,28 +209,28 @@ export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date())
     for (const [s, d, v] of [[r.siteA, r.dirA, r.valA], [r.siteB, r.dirB, r.valB]]) if (norm(s).startsWith(self.slice(0, 4))) selfVals[d].push(v);
   }
   for (const [sec, rows, key] of [["1.12 TX", S.tx, "TX"], ["1.13 RX", S.rx, "RX"]])
-    for (const r of rows) if (selfVals[key].length && !selfVals[key].some((v) => Math.abs(v - r.value) < 0.005)) add("R16", 2, "warn", sec, r.page, `${r.slot} ค่า ${r.value} dBm ไม่พบใน 1.11 Span Loss ฝั่ง ${key} ของไซต์ตัวเอง`);
+    for (const r of rows) if (selfVals[key].length && !selfVals[key].some((v) => Math.abs(v - r.value) < 0.005)) add("R16", 2, "warn", sec, r.page, M(`${r.slot} ค่า ${r.value} dBm ไม่พบใน 1.11 Span Loss ฝั่ง ${key} ของไซต์ตัวเอง`, `${r.slot} value ${r.value} dBm not found on the ${key} side of this site in 1.11 Span Loss`));
 
   // ---------- R19/R20 power ----------
   if (S.power) {
     const c = criteria;
     for (const [k, v] of [["Main", S.power.main], ["Stand-by", S.power.standby]]) {
-      if (v == null) { add("R19", 1, "fail", "1.5 Power", S.power.page, `ไม่มีค่าแรงดัน ${k}`); continue; }
+      if (v == null) { add("R19", 1, "fail", "1.5 Power", S.power.page, M(`ไม่มีค่าแรงดัน ${k}`, `No voltage value for ${k}`)); continue; }
       const av = Math.abs(v);
-      if (facts.power === "dc48") { if (av < c.dc48.min || av > c.dc48.max) add("R19", 3, "fail", "1.5 Power", S.power.page, `${k} ${v} V นอกช่วง -${c.dc48.min} ~ -${c.dc48.max} V`); }
-      else if (facts.power === "hvdc") { if (c.hvdc.min != null && (av < c.hvdc.min || av > c.hvdc.max)) add("R20", 3, "warn", "1.5 Power", S.power.page, `${k} ${v} V นอกช่วง HVDC ${c.hvdc.min}–${c.hvdc.max} V (เกณฑ์จากตัวอย่าง)`, "คนตรวจ"); }
-      else add("R20", 3, "info", "1.5 Power", S.power.page, `${k} ${v} V — ระบบไฟไม่ตรง -48V/HVDC ยังไม่มีเกณฑ์`, "คนตรวจ");
+      if (facts.power === "dc48") { if (av < c.dc48.min || av > c.dc48.max) add("R19", 3, "fail", "1.5 Power", S.power.page, M(`${k} ${v} V นอกช่วง -${c.dc48.min} ~ -${c.dc48.max} V`, `${k} ${v} V outside -${c.dc48.min} ~ -${c.dc48.max} V`)); }
+      else if (facts.power === "hvdc") { if (c.hvdc.min != null && (av < c.hvdc.min || av > c.hvdc.max)) add("R20", 3, "warn", "1.5 Power", S.power.page, M(`${k} ${v} V นอกช่วง HVDC ${c.hvdc.min}–${c.hvdc.max} V (เกณฑ์จากตัวอย่าง)`, `${k} ${v} V outside HVDC range ${c.hvdc.min}–${c.hvdc.max} V (threshold from samples)`), "คนตรวจ"); }
+      else add("R20", 3, "info", "1.5 Power", S.power.page, M(`${k} ${v} V — ระบบไฟไม่ตรง -48V/HVDC ยังไม่มีเกณฑ์`, `${k} ${v} V — power system is neither -48V nor HVDC, no threshold yet`), "คนตรวจ");
     }
-    if (facts.power === "hvdc") add("R20", 3, "info", "1.5 Power", S.power.page, `ไซต์ไฟ ~240 V — template ระบุช่วง -40.5~-57 V ไม่ตรงกับไซต์นี้ ต้องยืนยันเกณฑ์กับลูกค้า`, "CPM");
-    for (const [k, v] of [["Main", S.power.breakerMain], ["Stand-by", S.power.breakerStandby]]) if (v !== "PASS") add("R19", 3, "fail", "1.5 Power", S.power.page, `Breaker ${k} = '${v || "ว่าง"}'`);
+    if (facts.power === "hvdc") add("R20", 3, "info", "1.5 Power", S.power.page, M(`ไซต์ไฟ ~240 V — template ระบุช่วง -40.5~-57 V ไม่ตรงกับไซต์นี้ ต้องยืนยันเกณฑ์กับลูกค้า`, `~240 V site — template range -40.5~-57 V does not apply; confirm threshold with customer`), "CPM");
+    for (const [k, v] of [["Main", S.power.breakerMain], ["Stand-by", S.power.breakerStandby]]) if (v !== "PASS") add("R19", 3, "fail", "1.5 Power", S.power.page, M(`Breaker ${k} = '${v || "ว่าง"}'`, `Breaker ${k} = '${v || "blank"}'`));
   }
 
   // ---------- R21 ground ----------
   if (S.ground) {
     for (const [k, g] of [["Rack–Busbar", S.ground.rackToBusbar], ["Shelf–Rack", S.ground.shelfToRack]]) {
-      if (!g.raw) add("R21", 1, "fail", "1.6 Ground", S.ground.page, `ไม่มีค่ากราวด์ ${k}`);
-      else if (g.value == null) add("R21", 3, criteria.groundAllowNonNumeric.value ? "info" : "fail", "1.6 Ground", S.ground.page, `ค่ากราวด์ ${k} = '${g.raw}' ไม่ใช่ตัวเลข (template ให้วัดค่า < 1 Ω)`);
-      else if (g.value >= criteria.groundMax.value) add("R21", 3, "fail", "1.6 Ground", S.ground.page, `ค่ากราวด์ ${k} ${g.value} Ω ≥ ${criteria.groundMax.value} Ω`);
+      if (!g.raw) add("R21", 1, "fail", "1.6 Ground", S.ground.page, M(`ไม่มีค่ากราวด์ ${k}`, `No ground value for ${k}`));
+      else if (g.value == null) add("R21", 3, criteria.groundAllowNonNumeric.value ? "info" : "fail", "1.6 Ground", S.ground.page, M(`ค่ากราวด์ ${k} = '${g.raw}' ไม่ใช่ตัวเลข (template ให้วัดค่า < 1 Ω)`, `Ground ${k} = '${g.raw}' is not a number (template requires a measured value < 1 Ω)`));
+      else if (g.value >= criteria.groundMax.value) add("R21", 3, "fail", "1.6 Ground", S.ground.page, M(`ค่ากราวด์ ${k} ${g.value} Ω ≥ ${criteria.groundMax.value} Ω`, `Ground ${k} ${g.value} Ω ≥ ${criteria.groundMax.value} Ω`));
     }
   }
 
@@ -239,15 +240,15 @@ export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date())
     const tag = `core${r.core} ${r.siteA}-${r.siteB}`;
     if (r.dirA === r.dirB) continue;
     const tx = r.dirA === "TX" ? r.valA : r.valB, rx = r.dirA === "RX" ? r.valA : r.valB;
-    if (rx > 0) add("R22", 3, "fail", "1.11 Span", r.page, `${tag}: RX เป็นค่าบวก (${rx}) น่าจะพิมพ์ผิด`);
+    if (rx > 0) add("R22", 3, "fail", "1.11 Span", r.page, M(`${tag}: RX เป็นค่าบวก (${rx}) น่าจะพิมพ์ผิด`, `${tag}: RX is positive (${rx}), probably a typo`));
     const loss = tx - rx;
-    if (Math.abs(Math.abs(r.totalLoss) - Math.abs(loss)) > tol) add("R22", 3, "fail", "1.11 Span", r.page, `${tag}: Total Loss ${r.totalLoss} ≠ TX−RX = ${fmt(loss)}`);
+    if (Math.abs(Math.abs(r.totalLoss) - Math.abs(loss)) > tol) add("R22", 3, "fail", "1.11 Span", r.page, M(`${tag}: Total Loss ${r.totalLoss} ≠ TX−RX = ${fmt(loss)}`, `${tag}: Total Loss ${r.totalLoss} ≠ TX−RX = ${fmt(loss)}`));
     if (r.distance > 0) {
       const pk = Math.abs(r.totalLoss) / r.distance;
-      if (Math.abs(Math.abs(r.lossPerKm) - pk) > 0.011) add("R22", 3, "fail", "1.11 Span", r.page, `${tag}: Loss/km ${r.lossPerKm} ≠ ${fmt(pk)} (${fmt(Math.abs(r.totalLoss))} ÷ ${r.distance})`);
+      if (Math.abs(Math.abs(r.lossPerKm) - pk) > 0.011) add("R22", 3, "fail", "1.11 Span", r.page, M(`${tag}: Loss/km ${r.lossPerKm} ≠ ${fmt(pk)} (${fmt(Math.abs(r.totalLoss))} ÷ ${r.distance})`, `${tag}: Loss/km ${r.lossPerKm} ≠ ${fmt(pk)} (${fmt(Math.abs(r.totalLoss))} ÷ ${r.distance})`));
       const shortKm = criteria.shortSpanKm.value;
-      if (r.distance >= shortKm && pk > criteria.lossPerKmWarn.value) add("R23", 3, "warn", "1.11 Span", r.page, `${tag}: ${fmt(pk)} dB/km สูงกว่าตัวอย่าง (เกณฑ์เตือน ${criteria.lossPerKmWarn.value} dB/km, ระยะ ${r.distance} km)`, "คนตรวจ");
-      if (r.distance < shortKm && Math.abs(r.totalLoss) > criteria.shortSpanTotalLossWarn.value) add("R23", 3, "warn", "1.11 Span", r.page, `${tag}: span สั้น ${r.distance} km total loss ${fmt(Math.abs(r.totalLoss))} dB สูงกว่าตัวอย่าง (เกณฑ์เตือน ${criteria.shortSpanTotalLossWarn.value} dB)`, "คนตรวจ");
+      if (r.distance >= shortKm && pk > criteria.lossPerKmWarn.value) add("R23", 3, "warn", "1.11 Span", r.page, M(`${tag}: ${fmt(pk)} dB/km สูงกว่าตัวอย่าง (เกณฑ์เตือน ${criteria.lossPerKmWarn.value} dB/km, ระยะ ${r.distance} km)`, `${tag}: ${fmt(pk)} dB/km higher than samples (warning threshold ${criteria.lossPerKmWarn.value} dB/km, distance ${r.distance} km)`), "คนตรวจ");
+      if (r.distance < shortKm && Math.abs(r.totalLoss) > criteria.shortSpanTotalLossWarn.value) add("R23", 3, "warn", "1.11 Span", r.page, M(`${tag}: span สั้น ${r.distance} km total loss ${fmt(Math.abs(r.totalLoss))} dB สูงกว่าตัวอย่าง (เกณฑ์เตือน ${criteria.shortSpanTotalLossWarn.value} dB)`, `${tag}: short span ${r.distance} km, total loss ${fmt(Math.abs(r.totalLoss))} dB higher than samples (warning threshold ${criteria.shortSpanTotalLossWarn.value} dB)`), "คนตรวจ");
     }
   }
 
@@ -255,29 +256,29 @@ export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date())
   for (const [sec, rows] of [["1.12 TX", S.tx], ["1.13 RX", S.rx]])
     for (const r of rows) {
       const lo = Math.min(r.specLo, r.specHi), hi = Math.max(r.specLo, r.specHi);
-      if (r.value < lo || r.value > hi) add("R24", 3, "fail", sec, r.page, `${r.slot} ${r.module} = ${r.value} dBm นอกช่วง ${r.specLo} ~ ${r.specHi}`);
+      if (r.value < lo || r.value > hi) add("R24", 3, "fail", sec, r.page, M(`${r.slot} ${r.module} = ${r.value} dBm นอกช่วง ${r.specLo} ~ ${r.specHi}`, `${r.slot} ${r.module} = ${r.value} dBm outside ${r.specLo} ~ ${r.specHi}`));
     }
 
   // ---------- R25 visual / LCT / discovery ----------
-  for (const v of S.visual) if (v.result === "FAIL") add("R25", 3, "fail", "1.8 Visual", v.page, `${v.item} = FAIL`);
-  if (S.discovery && S.discovery.result !== "PASS") add("R25", 3, "fail", "1.10 Discovery", S.discovery.page, `Shelf/Pack discovery = '${S.discovery.result || "ว่าง"}'`);
-  for (const l of S.lct) if (l.result === "FAIL") add("R25", 3, "fail", "1.14 LCT", l.page, `${l.item} = FAIL`);
+  for (const v of S.visual) if (v.result === "FAIL") add("R25", 3, "fail", "1.8 Visual", v.page, M(`${v.item} = FAIL`, `${v.item} = FAIL`));
+  if (S.discovery && S.discovery.result !== "PASS") add("R25", 3, "fail", "1.10 Discovery", S.discovery.page, M(`Shelf/Pack discovery = '${S.discovery.result || "ว่าง"}'`, `Shelf/Pack discovery = '${S.discovery.result || "blank"}'`));
+  for (const l of S.lct) if (l.result === "FAIL") add("R25", 3, "fail", "1.14 LCT", l.page, M(`${l.item} = FAIL`, `${l.item} = FAIL`));
 
   // ---------- R26 calibration ----------
   if (criteria.calibrationCheck.value) {
-    if (!S.testEquipment.length) add("R26", 1, "fail", "1.3 Test Equipment", 7, "ไม่มีรายการเครื่องมือทดสอบ");
+    if (!S.testEquipment.length) add("R26", 1, "fail", "1.3 Test Equipment", 7, M("ไม่มีรายการเครื่องมือทดสอบ", "No test equipment listed"));
     for (const e of S.testEquipment) {
       const exp = parseDate(e.calTo);
-      if (!exp) add("R26", 1, "fail", "1.3 Test Equipment", e.page, `${e.desc} S/N ${e.serial}: ไม่มีวันหมดอายุ calibration`);
-      else if (de && exp < de) add("R26", 3, "fail", "1.3 Test Equipment", e.page, `${e.desc} S/N ${e.serial}: calibration หมดอายุ ${e.calTo} ก่อนวันติดตั้ง ${H.installEnd}`);
-      else if (exp < today) add("R26", 3, "info", "1.3 Test Equipment", e.page, `${e.desc} S/N ${e.serial}: calibration ใช้ได้ ณ วันติดตั้ง แต่หมดอายุแล้ว (${e.calTo}) — งานใหม่หลังวันนี้ต้องใช้ใบใหม่`, "ระบบ");
+      if (!exp) add("R26", 1, "fail", "1.3 Test Equipment", e.page, M(`${e.desc} S/N ${e.serial}: ไม่มีวันหมดอายุ calibration`, `${e.desc} S/N ${e.serial}: no calibration expiry date`));
+      else if (de && exp < de) add("R26", 3, "fail", "1.3 Test Equipment", e.page, M(`${e.desc} S/N ${e.serial}: calibration หมดอายุ ${e.calTo} ก่อนวันติดตั้ง ${H.installEnd}`, `${e.desc} S/N ${e.serial}: calibration expired ${e.calTo}, before installation ${H.installEnd}`));
+      else if (exp < today) add("R26", 3, "info", "1.3 Test Equipment", e.page, M(`${e.desc} S/N ${e.serial}: calibration ใช้ได้ ณ วันติดตั้ง แต่หมดอายุแล้ว (${e.calTo}) — งานใหม่หลังวันนี้ต้องใช้ใบใหม่`, `${e.desc} S/N ${e.serial}: calibration valid at installation but expired now (${e.calTo}) — new work needs a new certificate`), "ระบบ");
     }
   }
 
   // ---------- section 2 ----------
   const net = S.network || {};
   const filled = Object.entries(net).filter(([, v]) => v && v.filled).map(([k]) => k);
-  add("R02", 1, "info", "Section 2", null, filled.length ? `Network test ที่มีค่า: ${filled.join(", ")}` : "Section 2 Network test เป็น N/A ทั้งหมด (ทำระดับ link)");
+  add("R02", 1, "info", "Section 2", null, filled.length ? M(`Network test ที่มีค่า: ${filled.join(", ")}`, `Network tests with values: ${filled.join(", ")}`) : M("Section 2 Network test เป็น N/A ทั้งหมด (ทำระดับ link)", "Section 2 Network test is all N/A (done at link level)"));
 
   facts.spanPairs = spanPairs.map((p) => ({ far: p.far, distance: p.a.distance, rows: [p.a, p.b] }));
   if (facts.customerAccepted) {

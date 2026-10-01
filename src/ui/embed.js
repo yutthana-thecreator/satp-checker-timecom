@@ -1,5 +1,6 @@
 // ลายเซ็นภาพ (image embedding) ด้วย CLIP ViT-B/32 รันในเบราว์เซอร์ผ่าน transformers.js — โหลดโมเดลครั้งแรก ~90 MB แล้ว cache ในเบราว์เซอร์
 // ใช้เทียบรูปใหม่กับรูปอ้างอิงของหัวข้อเดียวกันโดยไม่ต้องดาวน์โหลดรูปย่อ: เก็บเฉพาะเวกเตอร์ 512 ค่า (int8 + base64 ≈ 700 ตัวอักษร) ใน Supabase
+import { L } from "../i18n.js";
 const LIB = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.5/+esm";
 const MODEL = "Xenova/clip-vit-base-patch32";
 let T = null, pipe = null, loading = null;
@@ -10,12 +11,12 @@ export function loadEmbedder(onProgress = () => {}) {
   if (pipe) return Promise.resolve(pipe);
   if (loading) return loading;
   loading = (async () => {
-    onProgress("กำลังโหลดไลบรารีเปรียบเทียบรูป…");
+    onProgress(L("กำลังโหลดไลบรารีเปรียบเทียบรูป…", "Loading image comparison library…"));
     T = await import(LIB);
     T.env.allowLocalModels = false;
     let last = "";
     pipe = await T.pipeline("image-feature-extraction", MODEL, { dtype: "q8", progress_callback: (p) => {
-      const t = p.status === "progress" ? `กำลังโหลดโมเดลเปรียบเทียบรูป ${p.file || ""} ${(p.progress || 0).toFixed(0)}%` : p.status === "ready" ? "โมเดลเปรียบเทียบรูปพร้อม" : "กำลังเตรียมโมเดลเปรียบเทียบรูป…";
+      const t = p.status === "progress" ? L(`กำลังโหลดโมเดลเปรียบเทียบรูป ${p.file || ""} ${(p.progress || 0).toFixed(0)}%`, `Loading image model ${p.file || ""} ${(p.progress || 0).toFixed(0)}%`) : p.status === "ready" ? L("โมเดลเปรียบเทียบรูปพร้อม", "Image model ready") : L("กำลังเตรียมโมเดลเปรียบเทียบรูป…", "Preparing image model…");
       if (t !== last) { last = t; onProgress(t); }
     } });
     return pipe;
