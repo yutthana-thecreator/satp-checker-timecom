@@ -192,10 +192,25 @@ export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date())
   if (/ILA/.test(facts.nodeType) && facts.degrees !== 2 && spans.length) add("R12", 1, "fail", "1.11 Span", spans[0].page, M(`ILA ต้องมี 2 ทิศ (4 แถว) แต่มี ${facts.degrees} ทิศ (${spans.length} แถว)`, `ILA must have 2 directions (4 rows) but has ${facts.degrees} (${spans.length} rows)`));
 
   // ---------- R15 TX/RX rows vs degrees, slot ซ้ำ ----------
-  for (const [sec, rows] of [["1.12 TX", S.tx], ["1.13 RX", S.rx]]) {
+  // ทิศของแถว TX/RX ไม่มีในตาราง 1.12/1.13 — อนุมานจากค่า dBm ที่ตรงกับฝั่งไซต์ตัวเองใน 1.11 Span Loss → ไซต์ปลายทาง
+  const dirOf = (key, value) => {
+    for (const r of spans) for (const [s, d, v, other] of [[r.siteA, r.dirA, r.valA, r.siteB], [r.siteB, r.dirB, r.valB, r.siteA]])
+      if (d === key && norm(s).startsWith(self.slice(0, 4)) && value != null && Math.abs(v - value) < 0.005) return other;
+    return null;
+  };
+  for (const [sec, rows, key] of [["1.12 TX", S.tx, "TX"], ["1.13 RX", S.rx, "RX"]]) {
     const slots = rows.map((r) => r.slot);
     const dup = [...new Set(slots.filter((s, i) => slots.indexOf(s) !== i))];
-    if (dup.length) add("R15", 2, "fail", sec, rows[0].page, M(`Slot ซ้ำ: ${dup.join(", ")}`, `Duplicate slot: ${dup.join(", ")}`));
+    if (dup.length) {
+      const detail = (lang) => dup.map((slot) => {
+        const hits = rows.map((r, i) => ({ r, i })).filter(({ r }) => r.slot === slot).map(({ r, i }) => {
+          const d = dirOf(key, r.value);
+          return lang === "th" ? `แถว ${i + 1} ${r.value} dBm${d ? ` → ทิศ ${d}` : ""}` : `row ${i + 1} ${r.value} dBm${d ? ` → ${d}` : ""}`;
+        });
+        return `${slot} (${hits.join(" · ")})`;
+      }).join(", ");
+      add("R15", 2, "fail", sec, rows[0].page, M(`Slot ซ้ำ: ${detail("th")}`, `Duplicate slot: ${detail("en")}`));
+    }
     if (rows.length && facts.degrees && rows.length !== facts.degrees) add("R15", 2, "fail", sec, rows[0].page, M(`จำนวนแถว ${rows.length} ≠ จำนวนทิศ ${facts.degrees}`, `${rows.length} rows ≠ ${facts.degrees} directions`));
   }
   if (S.tx.length && S.rx.length) {

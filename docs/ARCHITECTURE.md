@@ -92,7 +92,7 @@ flowchart TB
 
 **rules.js** `checkSite(site, criteria)` → `facts` (รหัส, ชนิด, โปรไฟล์, ทิศ, ไฟ, customerAccepted) + `issues` 26 กฎ 3 ระดับ:
 - ระดับ 1 ครบถ้วน: มี 2 ไฟล์, ช่องว่าง, template ค้าง, รูป/remark ครบ, calibration, checklist
-- ระดับ 2 สอดคล้อง: ชื่อไฟล์/โฟลเดอร์/Station Name/รายชื่อไซต์, SATP vs Attachment (model, IP), slot ซ้ำ, แถว TX/RX เท่าจำนวนทิศ, ค่า TX/RX ปรากฏในตาราง span, ระยะ core1/core2, R17 ค่า span ตรงกับเอกสารไซต์ปลายทางในชุดเดียวกัน
+- ระดับ 2 สอดคล้อง: ชื่อไฟล์/โฟลเดอร์/Station Name/รายชื่อไซต์, SATP vs Attachment (model, IP), slot ซ้ำใน 1.12/1.13 (R15 บอกแถวและทิศที่ชนกัน — อนุมานทิศจากค่า dBm ที่ตรงกับฝั่งไซต์ตัวเองใน 1.11), แถว TX/RX เท่าจำนวนทิศ, ค่า TX/RX ปรากฏในตาราง span, ระยะ core1/core2, R17 ค่า span ตรงกับเอกสารไซต์ปลายทางในชุดเดียวกัน
 - ระดับ 3 ค่าเทคนิค: แรงดัน -48/HVDC, กราวด์ < 1 Ω, loss/km และ total loss เทียบเกณฑ์, loss = TX−RX
 - `summarize(issues)` → fail/warn/status · `applyDecisions` ใส่คำตัดสินของ ROM (ดูข้อ 8)
 
