@@ -27,13 +27,18 @@ src/ui/report.js      สร้าง Excel
 src/ui/ocr.js         OCR ด้วย Tesseract.js (โหลดครั้งแรกจาก CDN)
 src/engine/ocrRules.js กฎ O01–O06 จากข้อความ OCR
 src/engine/labels.js  รูปแบบป้ายของโปรเจกต์ + ตรวจข้อความ OCR ของป้ายในรูปถ่าย
+src/engine/index.js   analyzeFiles: จับคู่ไฟล์ต่อไซต์ → extract/parse/rules + R17
 src/ui/learn.js       ฐานความรู้: การตัดสินใจ ROM, โปรไฟล์ที่เรียนรู้, รูปอ้างอิง (ROM + ไซต์ที่ลูกค้าเซ็นแล้ว), ซิงก์คลาวด์, ส่งออก/นำเข้า
 src/ui/cloud.js       Supabase: อ่าน/เขียนฐานความรู้ร่วม (ไม่ต้อง login), รูปย่อใน Storage
 src/ui/embed.js       ลายเซ็นภาพ CLIP (transformers.js) + เข้ารหัส int8/base64 + cosine
 src/config.js         Project URL + anon key ของ Supabase (ว่าง = ใช้ในเครื่องอย่างเดียว)
-supabase/schema.sql   ตาราง + RLS + bucket สำหรับฐานความรู้ร่วม
+supabase/schema.sql   ตาราง + RLS + bucket สำหรับฐานความรู้ร่วม · no-login.sql เปิดสิทธิ์ anon (โหมดที่ใช้อยู่)
 test/run-samples.mjs  รัน engine กับเอกสารตัวอย่างใน ../AGRID ../DC2DC (Node)
+test/serve.mjs        dev server :8090 (+ /samples/, POST /__out/ สำหรับผลทดสอบจากเบราว์เซอร์)
+test/review-report.py รายงาน Excel จากผลรีวิวรูปทั้งชุด · build-docs.py สร้างหน้าผังระบบ+ซอร์ส
+docs/ARCHITECTURE.md  ผังระบบและการทำงานโดยละเอียด (mermaid)
 ```
+ผังระบบและคำอธิบายการทำงานทั้ง 3 ส่วนอยู่ใน [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ## อัปเดตข้อมูล
 - **รายชื่อไซต์**: แก้ `src/data/sites.js` (ชีท `Schedule Plan I&C Thai` col C–F ของ Masterfile) แล้ว deploy ใหม่
