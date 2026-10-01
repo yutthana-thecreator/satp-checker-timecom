@@ -267,7 +267,7 @@ function renderResults() {
     const tr = el("tr", { class: "clickable", onclick: () => showDetail(r) },
       el("td", {}, r.facts.code), el("td", {}, r.site.folder), el("td", {}, r.site.satp?.header.project || ""), el("td", {}, r.site.satp?.header.model || ""), el("td", {}, r.facts.nodeKind || "?"), el("td", {}, `${r.facts.nodeType || "?"}_${r.facts.suffix || ""}`),
       el("td", {}, r.facts.profile || el("span", { class: "pill info" }, L("ไม่มี → ROM ตรวจเอง", "none → ROM reviews"))),
-      el("td", {}, r.facts.degrees ?? "-"), el("td", {}, r.facts.power), el("td", {}, pill(combineStatus(r))),
+      el("td", {}, r.facts.degrees ?? "-"), el("td", {}, r.facts.power), statusCell(r),
       el("td", {}, r.summary.fail), el("td", {}, r.summary.warn), el("td", { id: "rv-" + cssId(r.site.key) }, r.facts.customerAccepted ? "–" : `${rv.accept} / ${rv.reject} / ${rv.pending}`));
     t.append(tr);
   }
@@ -285,18 +285,26 @@ function tabLabel(r, which) {
 // อัปเดตหัวข้อ/ป้ายแท็บ/บรรทัดสถานะของไซต์ที่กำลังแสดง เมื่อผล OCR หรือรูปในพื้นหลังเปลี่ยน
 function refreshDetailHeader(r) {
   const box = $("#details"); if (!box || box.dataset.site !== r.site.key) return;
-  const h3 = box.querySelector("h3"); if (h3) h3.replaceChildren(`${r.facts.code} — ${r.site.folder}`, " ", pill(r.summary.status));
+  const h3 = box.querySelector("h3"); if (h3) h3.replaceChildren(`${r.facts.code} — ${r.site.folder}`, " ", pill(r.summary.status), " ", breakdownLine(r));
   for (const b of box.querySelectorAll(".tabs button[data-tab]")) b.textContent = tabLabel(r, b.dataset.tab);
   const line = box.querySelector("#pass-line"); if (line) line.replaceWith(passLine(r));
   // แท็บประเด็นเปิดอยู่ → วาดตารางใหม่ให้เห็นประเด็น OCR ที่เพิ่งเพิ่ม (แท็บอื่นไม่รบกวน)
   const active = box.querySelector(".tabs button.active");
   if (active?.dataset.tab === "issues") { const body = box.querySelector(".detail > div:last-child"); if (body && !body.querySelector(".page-canvas")) body.replaceChildren(issuesTable(r)); }
 }
+// ช่องสถานะ: ป้ายสถานะรวม + รายละเอียดข้อความ/OCR/รูป
+function statusCell(r) {
+  combineStatus(r);
+  return el("td", { class: "status-cell" }, pill(r.summary.status), breakdownLine(r));
+}
+function breakdownLine(r) {
+  const p = partSummary(r);
+  return el("div", { class: "hint breakdown" }, r.facts.customerAccepted ? L("ลูกค้าตรวจรับแล้ว", "Customer accepted") : L(`ข้อความ: ${p.text} · OCR: ${p.ocr} · รูป: ${p.photo}`, `Text: ${p.text} · OCR: ${p.ocr} · Photos: ${p.photo}`));
+}
 function passLine(r) {
   const p = partSummary(r);
-  return el("p", { id: "pass-line" },
-    el("span", { class: "hint" }, r.facts.customerAccepted ? L("ลูกค้าตรวจรับแล้ว — ไม่ต้องตรวจก่อน submit", "Customer accepted — no pre-submission check needed") : L(`ข้อความ: ${p.text} · OCR screenshot: ${p.ocr} · รูป: ${p.photo}`, `Text: ${p.text} · OCR screenshot: ${p.ocr} · Photos: ${p.photo}`)),
-    !r.facts.customerAccepted && /^ผ่าน/.test(r.summary.status) && !/ยังไม่/.test(r.summary.status) ? el("span", {}, L(" — ส่งลูกค้าได้", " — ready to submit")) : null);
+  const ready = !r.facts.customerAccepted && /^ผ่าน/.test(r.summary.status) && !/ยังไม่/.test(r.summary.status);
+  return el("p", { id: "pass-line", class: "hint" }, r.facts.customerAccepted ? L("ลูกค้าตรวจรับแล้ว — ไม่ต้องตรวจก่อน submit", "Customer accepted — no pre-submission check needed") : ready ? L("ผ่านครบทั้ง 3 ส่วน — ส่งลูกค้าได้", "All three parts passed — ready to submit") : "");
 }
 // ชื่อโปรไฟล์ (ไทยในโค้ด) → อังกฤษเมื่อสลับภาษา
 const profileNameText = (n) => (i18n.lang === "en" && n ? n.replace(/ต่อทิศ/g, "per degree").replace(/ทิศ/g, "degrees").replace(/ใช้เกณฑ์ (P\d)/g, "uses $1 thresholds").replace(/เรียนรู้จาก ROM/g, "learned from ROM") : n);
@@ -329,7 +337,7 @@ function showDetail(r, showInfo = false) {
   if (r.facts.customerAccepted) tabs.append(tabIssues, el("span", { class: "hint" }, L("ลูกค้าตรวจรับแล้ว — ไม่ต้องตรวจรูป / OCR", "Customer accepted — no photo / OCR check")));
   else tabs.append(tabIssues, tabReview, tabOcr);
   box.dataset.site = r.site.key;
-  box.replaceChildren(el("div", { class: "detail" }, el("h3", {}, `${facts.code} — ${r.site.folder}`, " ", pill(combineStatus(r))), head, tabs, body));
+  box.replaceChildren(el("div", { class: "detail" }, el("h3", {}, `${facts.code} — ${r.site.folder}`, " ", pill(combineStatus(r)), " ", breakdownLine(r)), head, tabs, body));
   body.append(issuesTable(r, showInfo));
   if (!showInfo) box.scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -796,7 +804,7 @@ function renderSummaryRow(r) {
   const rows = [...$("#summary").querySelectorAll("tr.clickable")];
   const row = rows.find((tr) => tr.children[1].textContent === r.site.folder && tr.children[0].textContent === r.facts.code);
   if (!row) return;
-  row.children[9].replaceChildren(pill(combineStatus(r))); row.children[10].textContent = r.summary.fail; row.children[11].textContent = r.summary.warn;
+  row.children[9].replaceWith(statusCell(r)); row.children[10].textContent = r.summary.fail; row.children[11].textContent = r.summary.warn;
   refreshDetailHeader(r);
 }
 
