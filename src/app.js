@@ -308,6 +308,7 @@ function passLine(r) {
 }
 // ชื่อโปรไฟล์ (ไทยในโค้ด) → อังกฤษเมื่อสลับภาษา
 const profileNameText = (n) => (i18n.lang === "en" && n ? n.replace(/ต่อทิศ/g, "per degree").replace(/ทิศ/g, "degrees").replace(/ใช้เกณฑ์ (P\d)/g, "uses $1 thresholds").replace(/เรียนรู้จาก ROM/g, "learned from ROM") : n);
+let currentDetail = null; // { key, openReview(focusKey) } ของไซต์ที่กำลังแสดง
 function showDetail(r, showInfo = false) {
   const box = $("#details");
   const facts = r.facts;
@@ -326,11 +327,14 @@ function showDetail(r, showInfo = false) {
   const tabs = el("div", { class: "tabs" });
   const body = el("div", {});
   const tabIssues = el("button", { class: "active", "data-tab": "issues", onclick: () => { activate(tabIssues); body.replaceChildren(issuesTable(r)); } }, tabLabel(r, "issues"));
-  const tabReview = el("button", { onclick: async () => {
+  const openReview = async (focusKey) => {
     activate(tabReview);
     const st = el("p", { class: "hint" }, L("กำลังดึงรูปจาก Attachment…", "Extracting photos from the Attachment…")); body.replaceChildren(st);
     body.replaceChildren(await reviewPanel(r, (t) => { st.textContent = t; }));
-  } }, tabLabel(r, "review"));
+    if (focusKey) { const card = body.querySelector("#ph-" + cssId(focusKey)); if (card) { card.scrollIntoView({ behavior: "smooth", block: "center" }); card.classList.add("focus"); setTimeout(() => card.classList.remove("focus"), 2500); } }
+  };
+  currentDetail = { key: r.site.key, openReview };
+  const tabReview = el("button", { onclick: () => openReview() }, tabLabel(r, "review"));
   tabReview.dataset.tab = "review";
   const tabOcr = el("button", { "data-tab": "ocr", onclick: () => { activate(tabOcr); const wrap = el("div", {}); body.replaceChildren(wrap); ocrPanel(r, wrap); } }, tabLabel(r, "ocr"));
   const activate = (b) => { for (const x of tabs.children) x.classList.toggle("active", x === b); };
@@ -351,7 +355,9 @@ function issuesTable(r, showInfo = false) {
   wrap.append(passLine(r));
   if (infos.length) wrap.append(el("button", { class: "btn small", onclick: () => wrap.replaceWith(issuesTable(r, !showInfo)) }, showInfo ? L("ซ่อนข้อมูลอ้างอิง", "Hide reference info") : L(`แสดงข้อมูลอ้างอิง (${infos.length})`, `Show reference info (${infos.length})`)));
   const rows = showInfo ? r.issues : real;
-  if (!rows.length) return wrap;
+  const rv = reviews[r.site.key];
+  const pendingPhotos = !r.facts.customerAccepted && rv?.reviewed ? (rv.items || []).filter((x) => !x.verdict) : [];
+  if (!rows.length && !pendingPhotos.length) return wrap;
   const t = el("table", { class: "tbl issues" }, el("tr", {}, ...[L("ระดับ", "Level"), L("ผล", "Result"), L("กฎ", "Rule"), "Section", L("หน้า", "Page"), L("ประเด็น", "Issue"), L("ใครตรวจต่อ", "Next reviewer"), L("การตัดสินใจ ROM", "ROM decision")].map((h) => el("th", {}, h))));
   wrap.append(t);
   const viewer = el("div", { class: "page-viewer" }); wrap.append(viewer);
@@ -374,6 +380,15 @@ function issuesTable(r, showInfo = false) {
     const pageCell = i.page ? el("td", {}, el("button", { class: "btn small", title: L("แสดงหน้าเอกสารและไฮไลต์จุดที่พบ", "Show the document page with the finding highlighted"), onclick: () => showIssuePage(r, i, viewer) }, L(`หน้า ${i.page}`, `Page ${i.page}`))) : el("td", {}, "");
     t.append(el("tr", {}, el("td", {}, levelText(i.level)), el("td", {}, el("span", { class: "pill " + (i.severity === "fail" ? "fail" : i.severity) }, sevText(i.severity)), i.origSeverity ? el("div", { class: "hint" }, L(`(เดิม ${sevText(i.origSeverity)})`, `(was ${sevText(i.origSeverity)})`)) : null), el("td", {}, i.rule), el("td", {}, sectionText(i.section)), pageCell, el("td", { class: "msg" }, msgOf(i)), el("td", {}, whoText(i.who)), cell));
   }
+  // รูปที่รอ ROM ตรวจ: แถวละรูป พร้อมปุ่มดูรูป (เปิดแท็บตรวจรูปแล้วเลื่อนไปที่รูปนั้น) และ Accept ได้ทันที
+  for (const it of pendingPhotos) {
+    const key = `${it.page}|${it.idx}`;
+    const view = el("button", { class: "btn small", title: L("เปิดแท็บตรวจรูปที่รูปนี้", "Open the Photos tab at this photo"), onclick: () => currentDetail?.key === r.site.key && currentDetail.openReview(key) }, L(`ดูรูป หน้า ${it.page}`, `View photo p.${it.page}`));
+    const accept = el("button", { class: "btn small", onclick: () => { setVerdict(r, it, "accept"); refresh(); } }, "Accept");
+    const reject = el("button", { class: "btn small", onclick: () => currentDetail?.key === r.site.key && currentDetail.openReview(key) }, L("Reject…", "Reject…"));
+    t.append(el("tr", { class: "photo-row" }, el("td", {}, L("รูป", "Photo")), el("td", {}, el("span", { class: "pill warn" }, L("รอ ROM", "Awaiting ROM"))), el("td", {}, "IMG"), el("td", {}, it.label || it.section), el("td", {}, view), el("td", { class: "msg" }, msgOf({ msg: it.auto, msg_en: it.auto_en })), el("td", {}, "ROM"), el("td", {}, accept, " ", reject)));
+  }
+  if (!r.facts.customerAccepted && r.site.att && !rv?.reviewed) t.append(el("tr", {}, el("td", { colspan: 8, class: "hint" }, L("รูปถ่าย: กำลังตรวจในพื้นหลัง — รูปที่ต้องให้ ROM ดูจะปรากฏที่นี่เมื่อเสร็จ", "Photos: checking in the background — photos needing ROM will appear here when done"))));
   return wrap;
 }
 
@@ -730,7 +745,7 @@ function similarStrip(similar) {
 }
 
 function reviewCard(r, item, im, pageText, similar = null) {
-  const card = el("div", { class: "review-item " + item.verdict });
+  const card = el("div", { class: "review-item " + item.verdict, id: "ph-" + cssId(`${item.page}|${item.idx}`) });
   const img = el("img", { src: thumb(im.canvas), loading: "lazy", alt: L(`หน้า ${item.page}`, `page ${item.page}`) });
   const reasonSel = el("select", {}, el("option", { value: "" }, L("เหตุผล Reject…", "Reject reason…")), ...REJECT_REASONS.map((x) => el("option", { value: x }, reasonText(x))));
   const reasonTxt = el("input", { type: "text", placeholder: L("รายละเอียด", "details"), size: "18" });

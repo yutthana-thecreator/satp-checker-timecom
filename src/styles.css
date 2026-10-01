@@ -57,6 +57,8 @@ h2 { font-size: 16px; margin: 0 0 10px; }
 .review-item .cap { font-size: 12px; margin: 6px 0; }
 .review-item .act { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .review-item.accept { border-color: var(--ok); background: var(--ok-bg); }
+.review-item.focus { outline: 3px solid var(--warn); outline-offset: 2px; }
+tr.photo-row td { background: #fffdf5; }
 .review-item.reject { border-color: var(--fail); background: var(--fail-bg); }
 .review-item select, .review-item input { font: inherit; font-size: 12px; }
 .auto-note { font-size: 12px; color: var(--warn); }
