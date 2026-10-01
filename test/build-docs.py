@@ -4,7 +4,7 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 md = open(os.path.join(root, "docs", "ARCHITECTURE.md"), encoding="utf-8").read()
 
-FILES = ["index.html", "src/styles.css", "src/config.js", "src/app.js", "src/engine/index.js", "src/engine/extract.js", "src/engine/parse.js",
+FILES = ["index.html", "src/styles.css", "src/config.js", "src/i18n.js", "src/app.js", "src/engine/index.js", "src/engine/extract.js", "src/engine/parse.js",
          "src/engine/rules.js", "src/engine/profiles.js", "src/engine/ocrRules.js", "src/engine/labels.js", "src/data/sites.js",
          "src/ui/images.js", "src/ui/embed.js", "src/ui/ocr.js", "src/ui/learn.js", "src/ui/cloud.js", "src/ui/report.js",
          "supabase/schema.sql", "supabase/no-login.sql", "vercel.json", "package.json",

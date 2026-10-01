@@ -11,6 +11,7 @@ SATP Checker ตรวจเอกสาร acceptance ของโปรเจ�
 - ตรวจ 3 ส่วนอัตโนมัติหลังกดปุ่มเดียว: ข้อความ → OCR screenshot → รูปถ่าย
 - ระบบตัดสินเองเฉพาะสิ่งที่ยืนยันได้ สิ่งที่ไม่มั่นใจส่งให้ ROM พร้อมหลักฐาน และจำคำตัดสินไว้ใช้ครั้งต่อไป
 - ฐานความรู้ (การตัดสินใจ รูปอ้างอิง ลายเซ็นภาพ inventory) อยู่บน Supabase ให้ทั้งทีมใช้ชุดเดียวกัน โดยไม่ต้อง login (ตัดสินใจโดยผู้ใช้)
+- หน้าเว็บ 2 ภาษา ไทย/English สลับได้ทันที (ปุ่ม "ไทย | EN" มุมบนขวา) ข้อความประเด็นถูกสร้างไว้ทั้งสองภาษาตั้งแต่ตอนตรวจ จึงไม่ต้องตรวจใหม่เมื่อสลับภาษา
 
 ## 2. ผังระบบ
 
@@ -59,6 +60,8 @@ flowchart TB
     DEC --> ST
     ST --> UI[ตารางสรุป · แท็บ ประเด็น/ตรวจรูป/OCR<br/>หน้าเอกสาร+ไฮไลต์ · ประวัติ]
     ST --> XL[Excel: สรุป ประเด็น ตรวจรูป ข้อมูลไซต์ Inventory]
+    I18N[i18n.js ไทย/EN<br/>L() ข้อความ UI · M() ประเด็น 2 ภาษา] --> UI
+    I18N --> XL
   end
   ROM((ROM)) -- ยอมรับ/ยืนยันปัญหา · Accept/Reject · ใช้ชุดนี้เป็นตัวอย่าง --> KB
 ```
@@ -159,6 +162,14 @@ flowchart TB
 
 ชีท สรุป (สถานะรวม, ไม่ผ่าน/เตือน, รูป Accept/Reject/รอ) · ประเด็น (ผล, ผลเดิม, การตัดสินใจ ROM, ขอบเขต, เหตุผล, โดย, เมื่อ) · ตรวจรูป (Accept อัตโนมัติ/ROM, Reject, เหตุผล, ข้อสังเกตของระบบ) · ข้อมูลไซต์ · Inventory (การ์ด/SW/CLEI/part/serial) สร้างสด ณ ตอนกด
 
+### ภาษา ไทย/English (i18n.js)
+
+- `i18n.lang` = `th` (ค่าเริ่มต้น) หรือ `en` เก็บใน localStorage `satp:lang` · ปุ่ม "ไทย | EN" มุมบนขวาของ header เรียก `setLang()` แล้ว render ใหม่ทั้งหน้า
+- ข้อความ UI ใช้ `L(th, en)` คืนค่าตามภาษาปัจจุบัน ณ ตอน render
+- ข้อความประเด็นจาก engine (R01–R26, O01–O10, ป้ายในรูป, หมายเหตุรูป) ใช้ `M(th, en)` คืน `{th, en}` เก็บไว้ในผลตรวจทั้งคู่ → `msgOf(issue)` เลือกตอนแสดงผล จึงสลับภาษาได้โดยไม่ต้องตรวจซ้ำ และผลเก่าในประวัติ/ฐานความรู้ที่มีแต่ `msg` ไทยยังแสดงได้
+- ค่าภายในยังเป็นไทยเพื่อให้ข้อมูลเดิมในฐานความรู้ใช้ได้: สถานะไซต์ (`statusText`), section (`sectionText`), ผู้ตัดสิน (`whoText`), ระดับ/ความรุนแรง (`levelText`, `sevText`), เหตุผล Reject (`reasonText` จับคู่ `REJECT_REASONS_TH` ↔ `REJECT_REASONS_EN`) · ลายเซ็นประเด็นในฐานความรู้คำนวณจากข้อความไทยเสมอ
+- ชื่อโปรไฟล์ P1–P5 แสดงชื่ออังกฤษในโหมด EN · Excel ใช้ภาษาที่เลือก ณ ตอนกดดาวน์โหลด (หัวตาราง, สถานะ, section, เหตุผล)
+
 ## 10. ข้อมูลตัวอย่างและผลคาลิเบรต
 
 - 46 ไซต์ AGRID/DC2DC (`../AGRID`, `../DC2DC`) → โปรไฟล์ P1–P4, เกณฑ์ค่าเทคนิค, รูปอ้างอิง 1,829 รูป/45 ไซต์ (OBSXB กับ CX2EB เป็นเอกสารเดียวกัน), inventory 44 ไซต์
@@ -177,24 +188,25 @@ flowchart TB
 
 | ไฟล์ | บรรทัด | หน้าที่ |
 |---|---|---|
-| index.html | 79 | หน้าเว็บ (โหลด JSZip, SheetJS จาก cdnjs) |
-| src/styles.css | 74 | สไตล์ |
+| index.html | 80 | หน้าเว็บ (โหลด JSZip, SheetJS จาก cdnjs) |
+| src/styles.css | 89 | สไตล์ |
 | src/config.js | 4 | Supabase URL + publishable key |
-| src/app.js | 835 | UI ทั้งหมด: โหลดไฟล์, ตรวจ, สถานะรวม, แท็บ, หน้าเอกสาร, ตรวจรูป, OCR, ฐานความรู้, ประวัติ, test hooks |
+| src/app.js | 904 | UI ทั้งหมด: โหลดไฟล์, ตรวจ, สถานะรวม, แท็บ, หน้าเอกสาร (ขนาดจริง/รูปต้นฉบับ), ตรวจรูป, OCR, ฐานความรู้, ประวัติ, สลับภาษา, test hooks |
+| src/i18n.js | 39 | ภาษา ไทย/EN: L()/M()/msgOf, statusText, sectionText, whoText, levelText, sevText, reasonText |
 | src/engine/extract.js | 111 | pdf.js → ข้อความ/รูปต่อหน้า |
 | src/engine/parse.js | 236 | โครงสร้าง SATP/Attachment |
-| src/engine/rules.js | 316 | กฎ R01–R26, summarize |
+| src/engine/rules.js | 317 | กฎ R01–R26, summarize |
 | src/engine/profiles.js | 109 | โปรไฟล์ P1–P5, DEFAULT_CRITERIA, โปรไฟล์ที่เรียนรู้ |
 | src/engine/index.js | 59 | analyzeFiles: จับคู่ไฟล์ต่อไซต์, เรียก extract/parse/rules, R17 |
-| src/engine/ocrRules.js | 225 | O01–O10, parseInventory, buildLayouts |
+| src/engine/ocrRules.js | 226 | O01–O10, parseInventory, buildLayouts |
 | src/engine/labels.js | 107 | รูปแบบป้ายโปรเจกต์ + checkLabelText |
 | src/data/sites.js | 62 | รายชื่อ 56 ไซต์ไทยจาก Masterfile |
 | src/ui/images.js | 100 | renderPage, pageImageCanvases, aHash, pixelDigest, blurScore, thumb |
 | src/ui/embed.js | 62 | CLIP embedding, encode/decode, cosine, rank |
-| src/ui/ocr.js | 192 | Tesseract: ocrSite, ocrLabels (ป้ายสีเหลือง), imageBBox |
+| src/ui/ocr.js | 193 | Tesseract: ocrSite, ocrLabels (ป้ายสีเหลือง), imageBBox |
 | src/ui/learn.js | 322 | ฐานความรู้ในเครื่อง + ซิงก์คลาวด์ + รูปอ้างอิง + inventory + สถิติ |
 | src/ui/cloud.js | 98 | Supabase client: pushRow/pushRows/deleteRow/pullAll, Storage |
-| src/ui/report.js | 50 | Excel |
+| src/ui/report.js | 51 | Excel |
 | supabase/schema.sql, no-login.sql | 68 | ตาราง, RLS, bucket, policy anon |
 | test/run-samples.mjs | 39 | regression 46 ไซต์ (Node) |
 | test/serve.mjs | 16 | dev server :8090 + /samples/ + POST /__out/ |
