@@ -413,9 +413,9 @@ async function showIssuePage(r, issue, viewer) {
   viewer.scrollIntoView({ behavior: "smooth", block: "nearest" });
   const doc = await openDoc(fileName);
   if (!doc) { viewer.replaceChildren(el("p", { class: "hint" }, L("ไม่พบไฟล์ในรายการที่โหลด", "File not found among the loaded files"))); return; }
-  let pageNo = issue.page;
+  let pageNo = issue.page, actualSize = false;
   const render = async () => {
-    const scale = 1.4;
+    const scale = 2; // render คมขึ้นสำหรับโหมดขนาดจริง (แสดงย่อพอดีจอเป็นค่าเริ่มต้น)
     const canvas = await renderPage(pdfjs, doc, pageNo, scale);
     const page = await doc.getPage(pageNo);
     const vp = page.getViewport({ scale });
@@ -440,9 +440,17 @@ async function showIssuePage(r, issue, viewer) {
       el("button", { class: "btn small", onclick: () => { if (pageNo > 1) { pageNo--; render(); } } }, "◀"), " ",
       el("button", { class: "btn small", onclick: () => { if (pageNo < doc.numPages) { pageNo++; render(); } } }, "▶"), " ",
       el("span", { class: "hint" }, pageNo === issue.page ? (hits ? L(`ไฮไลต์ ${hits} จุด: ${highlightTerms(issue.msg).join(", ")}`, `${hits} highlight(s): ${highlightTerms(issue.msg).join(", ")}`) : L("ไม่พบข้อความที่ตรงในหน้านี้ (อาจอยู่ในรูป/ตาราง) — ดูตาม section ", "No matching text on this page (may be inside an image/table) — see section ") + sectionText(issue.section)) : ""), " ",
+      el("button", { class: "btn small", title: L("สลับระหว่างย่อพอดีจอกับขนาดจริง (เลื่อนดูได้)", "Toggle between fit-to-width and actual size (scrollable)"), onclick: () => { actualSize = !actualSize; canvas.classList.toggle("actual", actualSize); zoomBtn.textContent = actualSize ? L("ย่อพอดีจอ", "Fit to width") : L("ขนาดจริง", "Actual size"); } }, actualSize ? L("ย่อพอดีจอ", "Fit to width") : L("ขนาดจริง", "Actual size")), " ",
+      el("button", { class: "btn small", title: L("ดึงรูป/screenshot ที่ฝังในหน้านี้มาแสดงที่ความละเอียดต้นฉบับ", "Show the images embedded in this page at their original resolution"), onclick: async () => {
+        const pg = await doc.getPage(pageNo); const imgs = await pageImageCanvases(pg); pg.cleanup();
+        const box = el("div", { class: "orig-images" }, el("p", { class: "hint" }, imgs.length ? L(`รูปต้นฉบับในหน้านี้ ${imgs.length} รูป (ขนาดจริง เลื่อนดูได้ · ดับเบิลคลิกเพื่อขยาย 2 เท่า)`, `${imgs.length} original image(s) on this page (actual size, scrollable · double-click to zoom 2×)`) : L("หน้านี้ไม่มีรูปฝัง", "No embedded images on this page")));
+        for (const im of imgs) { im.canvas.className = "orig-image"; im.canvas.title = `${im.width}×${im.height}`; im.canvas.addEventListener("dblclick", () => im.canvas.classList.toggle("x2")); box.append(el("div", { class: "orig-scroll" }, im.canvas)); }
+        const old = viewer.querySelector(".orig-images"); if (old) old.remove(); viewer.append(box); box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      } }, L("รูปต้นฉบับ", "Original images")), " ",
       el("button", { class: "btn small", onclick: () => viewer.replaceChildren() }, L("ปิด", "Close")));
-    canvas.className = "page-canvas";
-    viewer.replaceChildren(nav, canvas);
+    const zoomBtn = [...nav.querySelectorAll("button")].find((b) => /ขนาดจริง|Actual size|ย่อพอดีจอ|Fit to width/.test(b.textContent));
+    canvas.className = "page-canvas" + (actualSize ? " actual" : "");
+    viewer.replaceChildren(el("div", { class: "page-scroll" }, nav, canvas));
   };
   await render();
 }
@@ -871,7 +879,7 @@ if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
       renderFileList();
     },
     runCheck, harvestAllAsSamples: () => harvestSites(run.results, "sample", $("#progress")), get result() { return run; },
-    decideSiteImages, reviews,
+    decideSiteImages, reviews, showIssuePage,
     harvestInventory: async () => { // OCR เฉพาะ screenshot Inventory ของทุกไซต์ที่โหลด → เก็บผังการ์ด/serial ขึ้นคลาวด์
       const prog = $("#progress"); let n = 0, i = 0;
       for (const r of run.results) {

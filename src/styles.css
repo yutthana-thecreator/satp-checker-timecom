@@ -76,6 +76,12 @@ header .cloud .hint { color: #fffc; }
 h3 .breakdown { display: inline; margin: 0 0 0 4px; }
 .page-viewer { margin-top: 10px; }
 .page-canvas { max-width: 100%; height: auto; border: 1px solid var(--line); box-shadow: 0 2px 8px #0002; display: block; margin-top: 6px; }
+.page-canvas.actual { max-width: none; width: auto; }
+.page-scroll { overflow-x: auto; }
+.orig-images { margin-top: 10px; }
+.orig-scroll { overflow: auto; max-height: 80vh; border: 1px solid var(--line); margin: 6px 0; background: #fff; }
+.orig-image { display: block; cursor: zoom-in; }
+.orig-image.x2 { width: 200%; cursor: zoom-out; }
 .ref-item small { display: block; font-size: 10px; color: #555; text-align: center; max-width: 120px; }
 .ref-item.signed img { border-color: var(--blue); }
 .ref-strip.small { margin: 4px 0; padding: 4px; }
