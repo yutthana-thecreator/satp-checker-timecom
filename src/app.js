@@ -294,17 +294,19 @@ function refreshDetailHeader(r) {
 }
 function passLine(r) {
   const p = partSummary(r);
-  return el("p", { id: "pass-line" }, pill(r.summary.status), " ",
+  return el("p", { id: "pass-line" },
     el("span", { class: "hint" }, r.facts.customerAccepted ? L("ลูกค้าตรวจรับแล้ว — ไม่ต้องตรวจก่อน submit", "Customer accepted — no pre-submission check needed") : L(`ข้อความ: ${p.text} · OCR screenshot: ${p.ocr} · รูป: ${p.photo}`, `Text: ${p.text} · OCR screenshot: ${p.ocr} · Photos: ${p.photo}`)),
     !r.facts.customerAccepted && /^ผ่าน/.test(r.summary.status) && !/ยังไม่/.test(r.summary.status) ? el("span", {}, L(" — ส่งลูกค้าได้", " — ready to submit")) : null);
 }
+// ชื่อโปรไฟล์ (ไทยในโค้ด) → อังกฤษเมื่อสลับภาษา
+const profileNameText = (n) => (i18n.lang === "en" && n ? n.replace(/ต่อทิศ/g, "per degree").replace(/ทิศ/g, "degrees").replace(/ใช้เกณฑ์ (P\d)/g, "uses $1 thresholds").replace(/เรียนรู้จาก ROM/g, "learned from ROM") : n);
 function showDetail(r, showInfo = false) {
   const box = $("#details");
   const facts = r.facts;
   const S = r.site.satp;
   const head = el("div", { class: "facts" },
     `${S?.header.station || ""} · Model ${S?.header.model || "-"} · SW ${S?.software?.release || "-"} · ${L("ติดตั้ง", "Installed")} ${S?.header.installStart || "-"} – ${S?.header.installEnd || "-"} · Acceptance ${S?.header.acceptanceDate || L("ไม่มี", "none")} · `,
-    facts.profile ? L(`โปรไฟล์ ${facts.profile}: ${facts.profileName}`, `Profile ${facts.profile}: ${facts.profileName}`) : L(`ไม่ตรงโปรไฟล์ (ใกล้ ${facts.nearestProfile}: ${(facts.profileMismatches || []).join("; ")})`, `No matching profile (nearest ${facts.nearestProfile}: ${(facts.profileMismatches || []).join("; ")})`),
+    facts.profile ? L(`โปรไฟล์ ${facts.profile}: ${facts.profileName}`, `Profile ${facts.profile}: ${profileNameText(facts.profileName)}`) : L(`ไม่ตรงโปรไฟล์ (ใกล้ ${facts.nearestProfile}: ${(facts.profileMismatches || []).join("; ")})`, `No matching profile (nearest ${facts.nearestProfile}: ${(facts.profileMismatches || []).join("; ")})`),
     facts.siteRef ? L(` · รายชื่อไซต์: ${facts.siteRef.neName} ${facts.siteRef.shelfType}`, ` · Site list: ${facts.siteRef.neName} ${facts.siteRef.shelfType}`) : L(" · ไม่อยู่ในรายชื่อ 56 ไซต์", " · not in the 56-site list"));
   if (!facts.profile) head.append(" ", el("button", { class: "btn small", onclick: () => {
     if (!confirm(L(`ยืนยันว่าเอกสารไซต์ ${facts.code} ถูกต้องและใช้เป็นตัวอย่างอ้างอิงสำหรับ config แบบนี้ได้?\n(${facts.nodeType}, ${JSON.stringify(facts.shelves)}, ${facts.power}, ${facts.degrees} ทิศ)`, `Confirm that site ${facts.code} documents are correct and can serve as the reference for this configuration?\n(${facts.nodeType}, ${JSON.stringify(facts.shelves)}, ${facts.power}, ${facts.degrees} degrees)`))) return;
