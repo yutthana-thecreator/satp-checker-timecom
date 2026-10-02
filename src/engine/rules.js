@@ -81,8 +81,15 @@ export function checkSite(site, criteria = DEFAULT_CRITERIA, today = new Date())
   facts.signatureDates = withDate;
 
   // ---------- R06 placeholder ----------
-  if (S.placeholders.length) add("R06", 1, "fail", "SATP", S.placeholders[0], M(`มีข้อความ template ค้าง 'Type text here' หน้า ${S.placeholders.join(", ")}`, `Template placeholder 'Type text here' left on page ${S.placeholders.join(", ")}`));
-  if (A?.placeholders?.length) add("R06", 1, "fail", "Attachment", A.placeholders[0], M(`มีข้อความ template ค้าง 'Type text here' หน้า ${A.placeholders.join(", ")}`, `Template placeholder 'Type text here' left on page ${A.placeholders.join(", ")}`));
+  // ช่องหมายเหตุท้ายหัวข้อใน template เป็นข้อความ 'Type text here' — subcon ต้องลบหรือกรอก ถ้าเหลือไว้แสดงว่ายังไม่ได้ตรวจทานหน้านั้น
+  for (const [doc, sec] of [[S, "SATP"], [A, "Attachment"]]) {
+    const list = doc?.placeholderList?.length ? doc.placeholderList : (doc?.placeholders || []).map((page) => ({ page, section: "" }));
+    if (!list.length) continue;
+    const where = (lang) => list.map((x) => `${lang === "th" ? "หน้า" : "p."} ${x.page}${x.section ? ` (${x.section})` : ""}`).join(", ");
+    add("R06", 1, "fail", sec, list[0].page, M(
+      `ช่องหมายเหตุท้ายหัวข้อยังเป็นข้อความ template 'Type text here' ${list.length} จุด (ยังไม่ได้ลบหรือกรอก): ${where("th")} — ให้ subcon ลบข้อความนี้หรือใส่หมายเหตุจริง`,
+      `Template placeholder 'Type text here' left in the remark box of ${list.length} section(s) (not deleted or filled): ${where("en")} — subcon must delete it or enter a real remark`));
+  }
 
   // ---------- facts: degrees, modules, power, shelves ----------
   const spans = S.span;

@@ -190,7 +190,22 @@ export function parseSatp(pages) {
     return { page: p.no, date: d ? d[0] : "" };
   });
   out.placeholders = pages.filter((p) => /Type text here/i.test(p.text)).map((p) => p.no);
+  out.placeholderList = placeholderList(pages);
   out.blockDiagram = pages.slice(2).find((p) => /1\.1\s*\|?\s*BLOCK DIAGRAM/.test(p.text)) || null;
+  return out;
+}
+
+// หัวข้อที่ช่อง 'Type text here' สังกัด = บรรทัดหัวข้อ (เช่น "1.4 INVENTORY LIST") ล่าสุดก่อนช่องนั้น (หัวข้อหนึ่งอาจยาวหลายหน้า จึงจำข้ามหน้า)
+function placeholderList(pages) {
+  const out = [];
+  let head = "";
+  for (const p of pages) {
+    for (const l of p.lines) {
+      const h = l.match(/^(\d\.\d+)\s+([A-Z][A-Z0-9 &()\/\-]{3,})$/);
+      if (h) head = h[1] + " " + h[2].trim().split(/\s+/).map((w) => (/\d/.test(w) ? w : w.toLowerCase().replace(/(^|[(\/])([a-z])/g, (m, sp, c) => sp + c.toUpperCase()))).join(" ");
+      if (/Type text here/i.test(l) && !out.some((x) => x.page === p.no && x.section === head)) out.push({ page: p.no, section: head });
+    }
+  }
   return out;
 }
 
@@ -223,6 +238,7 @@ export function parseAttachment(pages) {
     for (const m of p.text.matchAll(/Name:\s*([^|]+)/g)) out.fiberScope.push({ name: m[1].trim(), page: p.no });
   }
   out.placeholders = pages.filter((p) => /Type text here/i.test(p.text)).map((p) => p.no);
+  out.placeholderList = placeholderList(pages);
   return out;
 }
 

@@ -32,21 +32,21 @@ export const DEFAULT_CRITERIA = {
 export const PROFILES = [
   {
     id: "P1",
-    name: "AGRID ILA — PSS-8 ×1, AWBILA ×2, 2 ทิศ, -48 V",
+    name: "AGRID ILA — PSS-8 ×1, AWBILA ×2, 2 ทิศ, DC -48~-54 V",
     match: { nodeType: "ILA", shelves: { "PSS-8": 1 }, power: "dc48", modules: ["SWR-1.2O", "SWR-1.20", "SWU12O", "SWU120"], degrees: [2, 2] },
     samples: 11,
     expect: { spanRows: 4, txRows: 2, rxRows: 2, shelfCount: 1, fiberScopeMin: 4 },
   },
   {
     id: "P2",
-    name: "AGRID ILA + OTDR — PSS-8 ×2, AWBILA ×2 + OTDR, 2 ทิศ, -48 V",
+    name: "AGRID ILA + OTDR — PSS-8 ×2, AWBILA ×2 + OTDR, 2 ทิศ, DC -48~-54 V",
     match: { nodeType: "ILA", shelves: { "PSS-8": 2 }, power: "dc48", modules: ["SWR-1.2O", "SWR-1.20", "SWU12O", "SWU120"], degrees: [2, 2] },
     samples: 11,
     expect: { spanRows: 4, txRows: 2, rxRows: 2, shelfCount: 2, fiberScopeMin: 4 },
   },
   {
     id: "P3",
-    name: "AGRID ROADM — PSI-8L, OMDCL+IRDM32 ต่อทิศ, MSH4-FSB, 2–5 ทิศ, -48 V",
+    name: "AGRID ROADM — PSI-8L, OMDCL+IRDM32 ต่อทิศ, MSH4-FSB, 2–5 ทิศ, DC -48~-54 V",
     match: { nodeType: "RDM", shelves: { "PSI-8L": [1, 3] }, power: "dc48", modules: ["SWR-1.2O", "SWR-1.20", "SWU12O", "SWU120"], degrees: [2, 5] },
     samples: 10,
     expect: { spanRowsPerDegree: 2, txRowsPerDegree: 1, rxRowsPerDegree: 1, fiberScopePerDegree: 2 },
@@ -60,7 +60,7 @@ export const PROFILES = [
   },
   {
     id: "P5",
-    name: "DC2DC ILA — PSS-8 ×1, AWBILA ×2, 2 ทิศ, -48 V (ใช้เกณฑ์ P1)",
+    name: "DC2DC ILA — PSS-8 ×1, AWBILA ×2, 2 ทิศ, DC -48~-54 V (ใช้เกณฑ์ P1)",
     match: { nodeType: "ILA", shelves: { "PSS-8": 1 }, power: "dc48", modules: ["SWR-1.2O", "SWR-1.20"], degrees: [2, 2], project: "DC2DC" },
     samples: 1,
     expect: { spanRows: 4, txRows: 2, rxRows: 2, shelfCount: 1, fiberScopeMin: 4 },
