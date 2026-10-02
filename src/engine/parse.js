@@ -196,13 +196,14 @@ export function parseSatp(pages) {
 }
 
 // หัวข้อที่ช่อง 'Type text here' สังกัด = บรรทัดหัวข้อ (เช่น "1.4 INVENTORY LIST") ล่าสุดก่อนช่องนั้น (หัวข้อหนึ่งอาจยาวหลายหน้า จึงจำข้ามหน้า)
+const ACRONYMS = /\b(ber|gmre|nms|lct|otdr|osc|dwdm|ila|roadm|pss|psi|fdf|odf|gnd|ip|ne|id|sw|ac|dc|vdc|hvdc|lan|wan|ems|rfc|bert|e2e)\b/gi;
 function placeholderList(pages) {
   const out = [];
   let head = "";
   for (const p of pages) {
     for (const l of p.lines) {
       const h = l.match(/^(\d\.\d+)\s+([A-Z][A-Z0-9 &()\/\-]{3,})$/);
-      if (h) head = h[1] + " " + h[2].trim().split(/\s+/).map((w) => (/\d/.test(w) ? w : w.toLowerCase().replace(/(^|[(\/])([a-z])/g, (m, sp, c) => sp + c.toUpperCase()))).join(" ");
+      if (h) head = h[1] + " " + h[2].trim().split(/\s+/).map((w) => (/\d/.test(w) ? w : w.toLowerCase().replace(/(^|[(\/])([a-z])/g, (m, sp, c) => sp + c.toUpperCase()))).join(" ").replace(ACRONYMS, (m) => m.toUpperCase());
       if (/Type text here/i.test(l) && !out.some((x) => x.page === p.no && x.section === head)) out.push({ page: p.no, section: head });
     }
   }
